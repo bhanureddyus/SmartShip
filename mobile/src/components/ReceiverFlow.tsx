@@ -110,17 +110,16 @@ export function ReceiverFlow({ context, token, onSubmit, acquire }: ReceiverFlow
         </>
       ) : null}
 
-      {current === 'photos' ? (
-        <>
-          <Text style={s.q}>Add photos</Text>
-          <Text style={s.sub}>Up to {MAX_PHOTOS}. Box, contents, anything that was opened or damaged — it helps the next family.</Text>
-          <PhotoPicker max={MAX_PHOTOS} target={{ kind: 'share', token }} onChange={setPhotos} onPending={setPending} acquire={acquire} />
-          <Row style={s.nav}>
-            <Button label="Back" tone="ghost" onPress={back} />
-            <Button label={photos.length ? 'Next' : 'Skip'} tone="primary" onPress={next} testID="next-photos" />
-          </Row>
-        </>
-      ) : null}
+      {/* Stays mounted (hidden) so an in-flight upload keeps reporting pending/done after the user moves on. */}
+      <View style={[s.col, current !== 'photos' && s.hidden]}>
+        <Text style={s.q}>Add photos</Text>
+        <Text style={s.sub}>Up to {MAX_PHOTOS}. Box, contents, anything that was opened or damaged — it helps the next family.</Text>
+        <PhotoPicker max={MAX_PHOTOS} target={{ kind: 'share', token }} onChange={setPhotos} onPending={setPending} acquire={acquire} />
+        <Row style={s.nav}>
+          <Button label="Back" tone="ghost" onPress={back} />
+          <Button label={photos.length ? 'Next' : 'Skip'} tone="primary" onPress={next} testID="next-photos" />
+        </Row>
+      </View>
 
       {current === 'story' ? (
         <>
@@ -188,6 +187,7 @@ export function ReceiverRecap({ report }: { report: Report | undefined }) {
 
 const s = StyleSheet.create({
   col: { gap: space.s4 },
+  hidden: { display: 'none' },
   dots: { justifyContent: 'center', gap: space.s2 },
   dot: { width: 8, height: 8, borderRadius: radius.pill, backgroundColor: colors.borderDefault },
   dotOn: { backgroundColor: colors.accentFg, width: 20 },

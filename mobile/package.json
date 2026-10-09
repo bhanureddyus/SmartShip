@@ -2,7 +2,7 @@
   "name": "ship2us-mobile",
   "version": "0.1.0",
   "private": true,
-  "description": "Ship2US — Expo (React Native) client sharing the web shipping engine and API",
+  "description": "Ship2US \u2014 Expo (React Native) client sharing the web shipping engine and API",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -34,6 +34,7 @@
   "devDependencies": {
     "@testing-library/react-native": "^13.3.3",
     "@types/jest": "29.5.14",
+    "@types/node": "^26.6.5",
     "@types/react": "~19.2.2",
     "jest": "~29.7.0",
     "jest-expo": "~57.0.5",
@@ -42,10 +43,18 @@
   },
   "jest": {
     "preset": "jest-expo",
-    "roots": ["<rootDir>"],
-    "testMatch": ["<rootDir>/__tests__/**/*.test.(ts|tsx)"],
+    "roots": [
+      "<rootDir>"
+    ],
+    "testMatch": [
+      "<rootDir>/__tests__/**/*.test.(ts|tsx)"
+    ],
     "transformIgnorePatterns": [
       "node_modules/(?!((jest-)?react-native|@react-native(-community)?)|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|expo-router|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|react-native-qrcode-svg)"
+    ],
+    "moduleDirectories": [
+      "node_modules",
+      "<rootDir>/node_modules"
     ]
   }
 }
