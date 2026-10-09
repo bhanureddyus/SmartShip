@@ -18,7 +18,7 @@ npx expo start
 1. Install **Expo Go** on your phone (App Store / Play Store).
 2. Scan the QR code the terminal prints (iOS: Camera app; Android: inside Expo Go).
    Phone and laptop must be on the same Wi-Fi; if the QR fails, run `npx expo start --tunnel`.
-3. Tap **Try the Hyderabad → Austin demo** and walk the five steps. Expect: 3 items,
+3. Tap **Try the Hyderabad → Austin demo** and walk the five steps. Expect: 4 items,
    12.55 kg billed, five quotes, Post EMS cheapest at $114.63 — identical to the web.
 4. On **Check**, tap **Yes** on the "Does this match what you've seen?" strip. The report lands in
    the hosted `data/db.json`; confirm at `<API_BASE>/admin` under Community reports.
