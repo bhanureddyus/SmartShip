@@ -140,6 +140,9 @@
   function route() {
     const hash = location.hash || '#/';
     const root = document.getElementById('appRoot');
+    const receiverMatch = hash.match(/^#\/r\/([A-Za-z0-9_-]+)$/);
+    setChrome(!receiverMatch);
+    if (receiverMatch) { renderReceiver(root, receiverMatch[1]); return; }
     document.getElementById('navAdmin').classList.toggle('active', hash.startsWith('#/admin'));
     document.getElementById('navAbout').classList.toggle('active', hash.startsWith('#/about'));
     if (hash.startsWith('#/admin')) { Admin.render(root); return; }
@@ -876,6 +879,268 @@
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(t).then(() => showToast('Copied.')).catch(() => showToast('Copy blocked by the browser — select the text manually.'));
     } else showToast('Copy not supported here — select the text manually.');
+  }
+
+  // =====================================================================
+  // RECEIVER ARRIVAL FLOW — #/r/:token
+  // Chrome-free, session-only. Talks only to the token-scoped share routes,
+  // so this page never learns the shipment id, items or cost. Kept in one
+  // block so the sender-side changes to this file merge without overlap.
+  // =====================================================================
+  const RCV_MAX_PHOTOS = 4;
+  const RCV_MAX_EDGE = 1600;   // px, long edge after client-side downscale
+  const RCV_STORY_MAX = 280;
+  const RCV_CONDITIONS = [
+    ['all_good', 'All good'],
+    ['damaged', 'Something damaged'],
+    ['missing', 'Something missing'],
+    ['opened_by_customs', 'Was opened by customs']
+  ];
+  const RCV_PANES_ARRIVED = ['arrived', 'condition', 'photos', 'story', 'send'];
+  const RCV_PANES_WAITING = ['arrived', 'story', 'send']; // nothing to rate or photograph yet
+  let rcv = null; // { token, status, ctx, pane, arrived, condition, photos, story, sending, error }
+
+  function setChrome(on) { document.body.classList.toggle('chrome-less', !on); }
+  function conditionLabel(key) { const c = RCV_CONDITIONS.find(([k]) => k === key); return c ? c[1] : key; }
+  function receiverPanes(r) { return r.arrived === false ? RCV_PANES_WAITING : RCV_PANES_ARRIVED; }
+  function receiverHeadline(ctx) {
+    const who = ctx.senderName ? esc(ctx.senderName) : 'Someone';
+    const what = typeof ctx.boxes === 'number' && ctx.boxes > 0 ? `${ctx.boxes} box${ctx.boxes === 1 ? '' : 'es'}` : 'a shipment';
+    const from = ctx.origin ? ` from ${esc(ctx.origin)}` : '';
+    return `${who} sent you ${what}${from}. Did it arrive?`;
+  }
+  // Condition taps: "All good" is exclusive with the problem taps.
+  function toggleCondition(list, key) {
+    if (list.includes(key)) return list.filter(k => k !== key);
+    return key === 'all_good' ? ['all_good'] : [...list.filter(k => k !== 'all_good'), key];
+  }
+  function receiverRoot() { return document.getElementById('appRoot'); }
+
+  async function fetchShareContext(token) {
+    const r = await fetch(`/api/share/${encodeURIComponent(token)}`);
+    if (r.status === 404) return { status: 'invalid' };
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'bad context');
+    return { status: j.used ? 'used' : 'open', ctx: j };
+  }
+
+  async function renderReceiver(root, token) {
+    if (!rcv || rcv.token !== token) {
+      rcv = { token, status: 'loading', ctx: null, pane: 0, arrived: null, condition: [], photos: [], story: '', sending: false, error: null };
+    }
+    if (rcv.status === 'loading') {
+      root.innerHTML = `<div class="page rcv"><div class="rcv-pane"><p class="muted">Opening your link…</p></div></div>`;
+      try { Object.assign(rcv, await fetchShareContext(token)); }
+      catch (e) { rcv.status = 'offline'; }
+    }
+    drawReceiver(root);
+  }
+
+  function drawReceiver(root) {
+    const r = rcv;
+    const page = inner => `<div class="page rcv">${inner}</div>`;
+    if (r.status === 'invalid') {
+      root.innerHTML = page(`<div class="rcv-pane rcv-center"><div class="rcv-ic">${I.stop}</div><h1 class="rcv-h">This link isn't valid</h1><p class="lede">Ask the sender for a fresh one.</p></div>`);
+      return;
+    }
+    if (r.status === 'offline') {
+      root.innerHTML = page(`<div class="rcv-pane rcv-center"><div class="rcv-ic">${I.warn}</div><h1 class="rcv-h">Couldn't open this link</h1><p class="lede">Check your connection and try again.</p><button class="btn btn-primary btn-lg" id="rcvRetry">Try again</button></div>`);
+      root.querySelector('#rcvRetry').addEventListener('click', () => { r.status = 'loading'; renderReceiver(root, r.token); });
+      return;
+    }
+    if (r.status === 'used' || r.status === 'sent') {
+      const justSent = r.status === 'sent';
+      root.innerHTML = page(`<div class="rcv-pane">
+        <div class="callout callout-ok"><span class="ic">${I.check}</span><div><b>${justSent ? 'Sent — thank you.' : 'Already sent — thank you.'}</b> ${justSent ? 'The next family shipping this way will see it.' : 'This link has been used; here is what was shared.'}</div></div>
+        <h2 class="rcv-h rcv-h-sm">${justSent ? 'What you told us' : 'What was reported'}</h2>
+        ${renderReceiverSummary(r.ctx.report || {}, { photos: (r.ctx.report && r.ctx.report.photos) || [] })}
+        <p class="fine">Shown to future senders as <b>community input · unverified</b>.</p>
+      </div>`);
+      return;
+    }
+    const panes = receiverPanes(r);
+    r.pane = Math.min(r.pane, panes.length - 1);
+    const key = panes[r.pane];
+    root.innerHTML = page(`
+      <div class="rcv-top">
+        ${r.pane > 0 ? `<button class="icon-btn" id="rcvBack" aria-label="Back">${I.back}</button>` : '<span class="icon-btn" aria-hidden="true"></span>'}
+        <div class="rcv-dots" role="progressbar" aria-label="Step ${r.pane + 1} of ${panes.length}" aria-valuemin="1" aria-valuemax="${panes.length}" aria-valuenow="${r.pane + 1}">${panes.map((_, i) => `<i class="${i <= r.pane ? 'on' : ''}"></i>`).join('')}</div>
+        <span class="icon-btn" aria-hidden="true"></span>
+      </div>
+      <div class="rcv-pane" data-pane="${key}">${renderReceiverPane(key, r)}</div>
+      <p class="fine rcv-foot">Takes about 30 seconds. No account — your answers appear to the next family as <b>community input · unverified</b>.</p>`);
+    bindReceiverPane(root, key, r);
+  }
+
+  function renderReceiverPane(key, r) {
+    const next = (label, disabled) => `<button class="btn btn-primary btn-lg btn-block" id="rcvNext" ${disabled ? 'disabled' : ''}>${label} ${I.arrow}</button>`;
+    switch (key) {
+      case 'arrived':
+        return `<h1 class="rcv-h">${receiverHeadline(r.ctx)}</h1>
+          <p class="lede">${r.ctx.dest ? `Heading to ${esc(r.ctx.dest)}.` : ''} Two taps and you're done.</p>
+          <div class="rcv-choices">
+            <button class="rcv-choice ${r.arrived === true ? 'on' : ''}" data-arrived="true"><span class="ic">${I.check}</span>Yes, it arrived</button>
+            <button class="rcv-choice ${r.arrived === false ? 'on' : ''}" data-arrived="false"><span class="ic">${I.box}</span>Still waiting</button>
+          </div>`;
+      case 'condition':
+        return `<h1 class="rcv-h">How was it?</h1><p class="lede">Tap everything that applies.</p>
+          <div class="rcv-choices">${RCV_CONDITIONS.map(([k, label]) => `<button class="rcv-choice ${r.condition.includes(k) ? 'on' : ''}" data-cond="${k}" aria-pressed="${r.condition.includes(k)}">${label}</button>`).join('')}</div>
+          ${next('Next', r.condition.length === 0)}`;
+      case 'photos':
+        return `<h1 class="rcv-h">Add photos</h1><p class="lede">Up to ${RCV_MAX_PHOTOS} — the box, what was inside, anything that surprised you.</p>
+          ${renderReceiverPhotoPicker(r)}
+          ${next(r.photos.length ? 'Next' : 'Skip for now', false)}`;
+      case 'story':
+        return `<h1 class="rcv-h">One line for the next family</h1><p class="lede">Optional. What would you tell someone ${r.ctx.origin ? `shipping from ${esc(r.ctx.origin)}` : 'shipping the same way'}?</p>
+          <textarea class="input" id="rcvStory" maxlength="${RCV_STORY_MAX}" placeholder="e.g. Everything came in one piece — the jars were wrapped well.">${esc(r.story)}</textarea>
+          <div class="fine rcv-count" id="rcvCount">${r.story.length}/${RCV_STORY_MAX}</div>
+          ${next(r.story.trim() ? 'Next' : 'Skip', false)}`;
+      case 'send': {
+        const pending = r.photos.some(p => p.status === 'uploading');
+        return `<h1 class="rcv-h">Ready to send?</h1><p class="lede">One tap. You can't edit it afterwards.</p>
+          ${renderReceiverSummary(r, { photos: r.photos.filter(p => p.status !== 'error').map(p => p.preview) })}
+          ${r.error ? `<div class="callout callout-err" style="margin-bottom:var(--space-3);"><span class="ic">${I.warn}</span><div>${esc(r.error)}</div></div>` : ''}
+          <button class="btn btn-primary btn-lg btn-block" id="rcvSend" ${pending || r.sending ? 'disabled' : ''}>${r.sending ? 'Sending…' : pending ? 'Waiting for photos to finish…' : 'Send'}</button>`;
+      }
+      default: return '';
+    }
+  }
+
+  // Own picker so this PR does not depend on the sender-side `renderPhotoPicker`.
+  function renderReceiverPhotoPicker(r) {
+    const statusLabel = { uploading: 'Uploading…', error: "Couldn't add this one" };
+    return `<div class="rcv-photos">
+      ${r.photos.map(p => `<div class="rcv-thumb ${p.status}" data-pid="${p.id}">
+        ${p.preview ? `<img src="${esc(p.preview)}" alt="Your photo">` : ''}
+        ${statusLabel[p.status] ? `<span class="st">${statusLabel[p.status]}</span>` : ''}
+        <button type="button" class="rcv-thumb-x" data-remove="${p.id}" aria-label="Remove photo">&times;</button>
+      </div>`).join('')}
+      ${r.photos.length < RCV_MAX_PHOTOS ? `<label class="rcv-add"><input type="file" id="rcvFile" accept="image/*" capture="environment" multiple>${I.camera}<span>Add photo</span></label>` : ''}
+    </div>`;
+  }
+
+  // Shared between the Send pane (previews) and the read-only recap (served paths).
+  function renderReceiverSummary(rep, { photos }) {
+    const arrived = rep.arrived === true ? 'Arrived' : rep.arrived === false ? 'Still waiting' : null;
+    const conds = Array.isArray(rep.condition) ? rep.condition : [];
+    return `<div class="rcv-recap">
+      ${arrived ? `<div><div class="k">Status</div><div class="row"><span class="chip">${arrived}</span></div></div>` : ''}
+      ${conds.length ? `<div><div class="k">How it was</div><div class="row">${conds.map(c => `<span class="chip">${esc(conditionLabel(c))}</span>`).join('')}</div></div>` : ''}
+      ${photos.length ? `<div><div class="k">Photos</div><div class="rcv-photos">${photos.map(src => `<div class="rcv-thumb done"><img src="${esc(src)}" alt="Receiver photo"></div>`).join('')}</div></div>` : ''}
+      ${rep.story && rep.story.trim() ? `<div><div class="k">For the next family</div><q>${esc(rep.story.trim())}</q></div>` : ''}
+      ${rep.submittedAt ? `<div class="fine">Sent ${esc(String(rep.submittedAt).slice(0, 10))}</div>` : ''}
+    </div>`;
+  }
+
+  function bindReceiverPane(root, key, r) {
+    const back = root.querySelector('#rcvBack');
+    if (back) back.addEventListener('click', () => { r.pane = Math.max(0, r.pane - 1); drawReceiver(root); scrollTop(); });
+    const advance = () => { r.pane += 1; drawReceiver(root); scrollTop(); };
+    const nextBtn = root.querySelector('#rcvNext');
+    if (nextBtn) nextBtn.addEventListener('click', advance);
+
+    if (key === 'arrived') {
+      root.querySelectorAll('[data-arrived]').forEach(b => b.addEventListener('click', () => {
+        r.arrived = b.dataset.arrived === 'true';
+        if (!r.arrived) r.condition = [];
+        advance();
+      }));
+    }
+    if (key === 'condition') {
+      root.querySelectorAll('[data-cond]').forEach(b => b.addEventListener('click', () => {
+        r.condition = toggleCondition(r.condition, b.dataset.cond);
+        drawReceiver(root);
+      }));
+    }
+    if (key === 'photos') bindReceiverPhotoPicker(root, r);
+    if (key === 'story') {
+      const ta = root.querySelector('#rcvStory');
+      ta.addEventListener('input', () => {
+        r.story = ta.value.slice(0, RCV_STORY_MAX);
+        root.querySelector('#rcvCount').textContent = `${r.story.length}/${RCV_STORY_MAX}`;
+        nextBtn.innerHTML = `${r.story.trim() ? 'Next' : 'Skip'} ${I.arrow}`;
+      });
+    }
+    if (key === 'send') root.querySelector('#rcvSend').addEventListener('click', () => sendReceiverReport(root, r));
+  }
+
+  function bindReceiverPhotoPicker(root, r) {
+    const file = root.querySelector('#rcvFile');
+    if (file) file.addEventListener('change', () => { addReceiverPhotos(r, Array.from(file.files || [])); });
+    root.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => {
+      const p = r.photos.find(x => x.id === b.dataset.remove);
+      if (p && p.preview) URL.revokeObjectURL(p.preview);
+      r.photos = r.photos.filter(x => x.id !== b.dataset.remove);
+      drawReceiver(root);
+    }));
+  }
+
+  // Re-render only on panes that show upload state; the story textarea keeps the caret.
+  function redrawReceiverIfUploadPane() {
+    if (rcv !== null && rcv.status === 'open' && ['photos', 'send'].includes(receiverPanes(rcv)[rcv.pane])) drawReceiver(receiverRoot());
+  }
+
+  // Long edge capped so a 12 MB phone shot never hits the server's 4 MB limit.
+  function downscaleImage(file, maxEdge) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => (b ? resolve(b) : reject(new Error('Could not encode image'))), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Not an image')); };
+      img.src = url;
+    });
+  }
+
+  async function addReceiverPhotos(r, files) {
+    for (const file of files) {
+      if (r.photos.length >= RCV_MAX_PHOTOS) break;
+      const p = { id: 'ph_' + Math.random().toString(36).slice(2, 8), status: 'uploading', preview: '', path: null };
+      r.photos.push(p);
+      redrawReceiverIfUploadPane();
+      try {
+        const blob = await downscaleImage(file, RCV_MAX_EDGE);
+        p.preview = URL.createObjectURL(blob);
+        redrawReceiverIfUploadPane();
+        const res = await fetch(`/api/share/${encodeURIComponent(r.token)}/photo`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok || !j.path) throw new Error(j.error || 'Upload failed');
+        p.status = 'done';
+        p.path = j.path;
+      } catch (e) {
+        p.status = 'error'; // red ring + "Couldn't add this one"; the rest proceed
+      }
+      redrawReceiverIfUploadPane();
+    }
+  }
+
+  async function sendReceiverReport(root, r) {
+    if (r.sending) return;
+    r.sending = true; r.error = null;
+    drawReceiver(root);
+    const report = { arrived: r.arrived, photos: r.photos.filter(p => p.status === 'done').map(p => p.path) };
+    if (r.arrived && r.condition.length) report.condition = r.condition;
+    if (r.story.trim()) report.story = r.story.trim().slice(0, RCV_STORY_MAX);
+    try {
+      const res = await fetch(`/api/share/${encodeURIComponent(r.token)}/report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 404) r.status = 'invalid';
+      else if (res.status === 409) Object.assign(r, await fetchShareContext(r.token)); // someone else used it first — show their recap
+      else if (!res.ok || !j.ok) throw new Error(j.error || 'Send failed');
+      else { r.ctx = { ...r.ctx, used: true, report: j.report }; r.status = 'sent'; }
+    } catch (e) {
+      r.error = "Couldn't send — check your connection and try again.";
+    }
+    r.sending = false;
+    drawReceiver(root);
+    scrollTop();
   }
 
   // ---------- ABOUT ----------
