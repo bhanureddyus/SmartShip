@@ -1,0 +1,6 @@
+node_modules/
+.DS_Store
+
+# Runtime artifacts of the JSON store. data/db.json itself stays tracked — it is the seed store the app needs at boot.
+data/*.json.bak
+data/db.json.tmp

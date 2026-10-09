@@ -1,0 +1,1053 @@
+{
+  "shipments": [
+    {
+      "id": "shp_mv1aog56udg4",
+      "view": "wizard",
+      "step": 4,
+      "segment": "consumer",
+      "originCountry": "IN",
+      "origin": "Hyderabad",
+      "dest": "Austin",
+      "corridor": "IN-US",
+      "narrative": "I'm shipping 5 kg of snacks, 2 pickle jars, and 3 kg of clothes from Hyderabad to Austin",
+      "items": [
+        {
+          "uid": "it_ps6fti2",
+          "desc": "Packaged snacks & sweets",
+          "qty": 5,
+          "unit": "kg",
+          "weightKg": 5,
+          "valueUsd": 40,
+          "ruleId": "snacks",
+          "source": "demo"
+        },
+        {
+          "uid": "it_lomprh9",
+          "desc": "Pickles & preserves (homemade)",
+          "qty": 2,
+          "unit": "jar",
+          "weightKg": 1,
+          "valueUsd": 12,
+          "ruleId": "pickles",
+          "source": "demo"
+        },
+        {
+          "uid": "it_b7cfum9",
+          "desc": "Clothing & wearables",
+          "qty": 3,
+          "unit": "kg",
+          "weightKg": 3,
+          "valueUsd": 45,
+          "ruleId": "clothes",
+          "source": "demo"
+        },
+        {
+          "uid": "it_48svw43",
+          "desc": "Gift items & souvenirs",
+          "qty": 2,
+          "unit": "piece",
+          "weightKg": 1,
+          "valueUsd": 20,
+          "ruleId": "gifts",
+          "source": "demo"
+        },
+        {
+          "uid": "p1",
+          "desc": "Packaged snacks & sweets",
+          "qty": 5,
+          "unit": "kg",
+          "weightKg": 5,
+          "valueUsd": 40,
+          "ruleId": "snacks",
+          "source": "parsed"
+        },
+        {
+          "uid": "p2",
+          "desc": "Pickle Jars",
+          "qty": 2,
+          "unit": "jar",
+          "weightKg": 1,
+          "valueUsd": 12,
+          "ruleId": "pickles",
+          "source": "parsed"
+        },
+        {
+          "uid": "p3",
+          "desc": "Clothing & wearables",
+          "qty": 3,
+          "unit": "kg",
+          "weightKg": 3,
+          "valueUsd": 45,
+          "ruleId": "clothes",
+          "source": "parsed"
+        }
+      ],
+      "pending": [],
+      "photoNames": [],
+      "optMode": "balance",
+      "chosen": "ups-saver",
+      "checklist": {},
+      "feedbackDone": false,
+      "updatedAt": "2026-10-09T21:13:57.821Z",
+      "packing": {
+        "boxes": [
+          {
+            "seq": 1,
+            "boxId": "S",
+            "boxName": "Small box",
+            "dimsIn": [
+              10,
+              8,
+              6
+            ],
+            "tareKg": 0.3,
+            "group": "padded",
+            "groupNote": "Packed with double cushioning, sealed liners for liquids, and “Fragile” labels on all sides.",
+            "forced": false,
+            "contents": [
+              "Pickles & preserves (homemade) ×2",
+              "Pickle Jars ×2"
+            ],
+            "actualKg": 2.3,
+            "dimKg": 1.57,
+            "chargeableKg": 2.3,
+            "utilization": 28
+          },
+          {
+            "seq": 2,
+            "boxId": "M",
+            "boxName": "Medium box",
+            "dimsIn": [
+              14,
+              12,
+              10
+            ],
+            "tareKg": 0.5,
+            "group": "food",
+            "groupNote": "Food is packed away from clothing and electronics, in a liner bag, sealed tight to keep smells and spills in.",
+            "forced": false,
+            "contents": [
+              "Packaged snacks & sweets ×5",
+              "Packaged snacks & sweets ×5"
+            ],
+            "actualKg": 10.5,
+            "dimKg": 5.48,
+            "chargeableKg": 10.5,
+            "utilization": 58
+          },
+          {
+            "seq": 3,
+            "boxId": "L",
+            "boxName": "Large box",
+            "dimsIn": [
+              18,
+              14,
+              12
+            ],
+            "tareKg": 0.7,
+            "group": "general",
+            "groupNote": "Soft goods are folded tight to save space; heavier items sit at the bottom.",
+            "forced": false,
+            "contents": [
+              "Clothing & wearables ×3",
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2"
+            ],
+            "actualKg": 7.7,
+            "dimKg": 9.87,
+            "chargeableKg": 9.87,
+            "utilization": 74
+          }
+        ],
+        "materials": {
+          "boxes": [
+            {
+              "label": "Small box",
+              "n": 1
+            },
+            {
+              "label": "Medium box",
+              "n": 1
+            },
+            {
+              "label": "Large box",
+              "n": 1
+            }
+          ],
+          "tapeRolls": 2,
+          "bubbleWrapRolls": 1,
+          "linerBags": 1,
+          "labels": 6
+        },
+        "notes": [],
+        "splitHint": "Three or more boxes: many forwarders price 2+ box shipments better than couriers, and separate food boxes reduce inspection risk for the rest of your shipment.",
+        "groups": [
+          {
+            "key": "padded",
+            "label": "Fragile & liquids",
+            "weightKg": 2,
+            "items": [
+              "Pickles & preserves (homemade) ×2",
+              "Pickle Jars ×2"
+            ]
+          },
+          {
+            "key": "food",
+            "label": "Food items",
+            "weightKg": 10,
+            "items": [
+              "Packaged snacks & sweets ×5",
+              "Packaged snacks & sweets ×5"
+            ]
+          },
+          {
+            "key": "general",
+            "label": "Clothing & general",
+            "weightKg": 7,
+            "items": [
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2",
+              "Clothing & wearables ×3"
+            ]
+          }
+        ]
+      },
+      "cost": {
+        "quotes": [
+          {
+            "carrierId": "dhl",
+            "name": "DHL Express Worldwide",
+            "tier": "Express courier",
+            "freight": 257.37,
+            "fuel": 30.88,
+            "packaging": 12.4,
+            "duties": 21.86,
+            "fees": 0,
+            "insurance": 3.21,
+            "customs": 12,
+            "total": 337.72,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Door pickup included",
+              "Customs paperwork handled online"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "fedex-econ",
+            "name": "FedEx International Economy",
+            "tier": "Balanced courier",
+            "freight": 220.89,
+            "fuel": 26.51,
+            "packaging": 12.4,
+            "duties": 21.86,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 10,
+            "total": 294.66,
+            "daysMin": 5,
+            "daysMax": 7,
+            "tracking": "Full tracking with delivery alerts",
+            "features": [
+              "Good price/speed balance",
+              "Paperless invoice supported"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "ups-saver",
+            "name": "UPS Worldwide Saver",
+            "tier": "Express courier",
+            "freight": 244.03,
+            "fuel": 30.5,
+            "packaging": 12.4,
+            "duties": 21.86,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 11,
+            "total": 322.79,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Early-day delivery option",
+              "Strong US customs brokerage"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "post-ems",
+            "name": "National Post EMS (Speed Post)",
+            "tier": "Budget postal",
+            "freight": 142.69,
+            "fuel": 0,
+            "packaging": 12.4,
+            "duties": 21.86,
+            "fees": 0,
+            "insurance": 2.14,
+            "customs": 3,
+            "total": 182.09,
+            "daysMin": 10,
+            "daysMax": 16,
+            "tracking": "Basic milestone tracking",
+            "features": [
+              "Lowest headline price",
+              "Widely available at local post offices"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "forwarder",
+            "name": "Meridian Freight (forwarder)",
+            "tier": "Freight forwarder",
+            "freight": 179.16,
+            "fuel": 17.92,
+            "packaging": 12.4,
+            "duties": 21.86,
+            "fees": 0,
+            "insurance": 2.14,
+            "customs": 0,
+            "total": 233.48,
+            "daysMin": 8,
+            "daysMax": 12,
+            "tracking": "Tracking + human support",
+            "features": [
+              "Accepts documented food shipments",
+              "Helps split complex shipments"
+            ],
+            "customsIncluded": "Concierge customs prep included",
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          }
+        ],
+        "chargeableKg": 22.67,
+        "packagingCost": 12.4,
+        "duties": 21.86,
+        "fees": 0,
+        "declaredTotal": 214,
+        "dutyLines": [
+          {
+            "item": "Packaged snacks & sweets",
+            "value": 40,
+            "rate": 0.05,
+            "duty": 2
+          },
+          {
+            "item": "Pickles & preserves (homemade)",
+            "value": 12,
+            "rate": 0.086,
+            "duty": 1.03
+          },
+          {
+            "item": "Clothing & wearables",
+            "value": 45,
+            "rate": 0.16,
+            "duty": 7.2
+          },
+          {
+            "item": "Gift items & souvenirs",
+            "value": 20,
+            "rate": 0.07,
+            "duty": 1.4
+          },
+          {
+            "item": "Packaged snacks & sweets",
+            "value": 40,
+            "rate": 0.05,
+            "duty": 2
+          },
+          {
+            "item": "Pickle Jars",
+            "value": 12,
+            "rate": 0.086,
+            "duty": 1.03
+          },
+          {
+            "item": "Clothing & wearables",
+            "value": 45,
+            "rate": 0.16,
+            "duty": 7.2
+          }
+        ]
+      },
+      "savedAt": "2026-10-09T21:13:58.693Z"
+    },
+    {
+      "id": "shp_mv1e89zr198i",
+      "view": "wizard",
+      "step": 0,
+      "segment": "consumer",
+      "originCountry": "IN",
+      "origin": "Hyderabad",
+      "dest": "Austin, TX",
+      "corridor": "IN-US",
+      "narrative": "I'm shipping 5 kg of snacks, 2 pickle jars, and 3 kg of clothes from Hyderabad to Austin",
+      "items": [
+        {
+          "uid": "it_qy3nku3",
+          "desc": "Packaged snacks & sweets",
+          "qty": 5,
+          "unit": "kg",
+          "weightKg": 5,
+          "valueUsd": 40,
+          "ruleId": "snacks",
+          "source": "demo"
+        },
+        {
+          "uid": "it_irorn3z",
+          "desc": "Pickles & preserves (homemade)",
+          "qty": 2,
+          "unit": "jar",
+          "weightKg": 1,
+          "valueUsd": 12,
+          "ruleId": "pickles",
+          "source": "demo"
+        },
+        {
+          "uid": "it_0p9vj0q",
+          "desc": "Clothing & wearables",
+          "qty": 3,
+          "unit": "kg",
+          "weightKg": 3,
+          "valueUsd": 45,
+          "ruleId": "clothes",
+          "source": "demo"
+        },
+        {
+          "uid": "it_pdaer88",
+          "desc": "Gift items & souvenirs",
+          "qty": 2,
+          "unit": "piece",
+          "weightKg": 1,
+          "valueUsd": 20,
+          "ruleId": "gifts",
+          "source": "demo"
+        }
+      ],
+      "pending": [],
+      "photoNames": [],
+      "optMode": "balance",
+      "chosen": "ups-saver",
+      "checklist": {},
+      "feedbackDone": false,
+      "updatedAt": "2026-10-09T20:08:43.466Z",
+      "packing": {
+        "boxes": [
+          {
+            "seq": 1,
+            "boxId": "S",
+            "boxName": "Small box",
+            "dimsIn": [
+              10,
+              8,
+              6
+            ],
+            "tareKg": 0.3,
+            "group": "padded",
+            "groupNote": "Packed with double cushioning, sealed liners for liquids, and “Fragile” labels on all sides.",
+            "forced": false,
+            "contents": [
+              "Pickles & preserves (homemade) ×2"
+            ],
+            "actualKg": 1.3,
+            "dimKg": 1.57,
+            "chargeableKg": 1.57,
+            "utilization": 14
+          },
+          {
+            "seq": 2,
+            "boxId": "M",
+            "boxName": "Medium box",
+            "dimsIn": [
+              14,
+              12,
+              10
+            ],
+            "tareKg": 0.5,
+            "group": "food",
+            "groupNote": "Food is packed away from clothing and electronics, in a liner bag, sealed tight to keep smells and spills in.",
+            "forced": false,
+            "contents": [
+              "Packaged snacks & sweets ×5"
+            ],
+            "actualKg": 5.5,
+            "dimKg": 5.48,
+            "chargeableKg": 5.5,
+            "utilization": 29
+          },
+          {
+            "seq": 3,
+            "boxId": "M",
+            "boxName": "Medium box",
+            "dimsIn": [
+              14,
+              12,
+              10
+            ],
+            "tareKg": 0.5,
+            "group": "general",
+            "groupNote": "Soft goods are folded tight to save space; heavier items sit at the bottom.",
+            "forced": false,
+            "contents": [
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2"
+            ],
+            "actualKg": 4.5,
+            "dimKg": 5.48,
+            "chargeableKg": 5.48,
+            "utilization": 73
+          }
+        ],
+        "materials": {
+          "boxes": [
+            {
+              "label": "Small box",
+              "n": 1
+            },
+            {
+              "label": "Medium box",
+              "n": 2
+            }
+          ],
+          "tapeRolls": 2,
+          "bubbleWrapRolls": 1,
+          "linerBags": 1,
+          "labels": 6
+        },
+        "notes": [],
+        "splitHint": "Three or more boxes: many forwarders price 2+ box shipments better than couriers, and separate food boxes reduce inspection risk for the rest of your shipment.",
+        "groups": [
+          {
+            "key": "padded",
+            "label": "Fragile & liquids",
+            "weightKg": 1,
+            "items": [
+              "Pickles & preserves (homemade) ×2"
+            ]
+          },
+          {
+            "key": "food",
+            "label": "Food items",
+            "weightKg": 5,
+            "items": [
+              "Packaged snacks & sweets ×5"
+            ]
+          },
+          {
+            "key": "general",
+            "label": "Clothing & general",
+            "weightKg": 4,
+            "items": [
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2"
+            ]
+          }
+        ]
+      },
+      "cost": {
+        "quotes": [
+          {
+            "carrierId": "dhl",
+            "name": "DHL Express Worldwide",
+            "tier": "Express courier",
+            "freight": 161.23,
+            "fuel": 19.35,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 12,
+            "total": 219.01,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Door pickup included",
+              "Customs paperwork handled online"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "fedex-econ",
+            "name": "FedEx International Economy",
+            "tier": "Balanced courier",
+            "freight": 137.91,
+            "fuel": 16.55,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 10,
+            "total": 190.89,
+            "daysMin": 5,
+            "daysMax": 7,
+            "tracking": "Full tracking with delivery alerts",
+            "features": [
+              "Good price/speed balance",
+              "Paperless invoice supported"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "ups-saver",
+            "name": "UPS Worldwide Saver",
+            "tier": "Express courier",
+            "freight": 152.95,
+            "fuel": 19.12,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 11,
+            "total": 209.5,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Early-day delivery option",
+              "Strong US customs brokerage"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "post-ems",
+            "name": "National Post EMS (Speed Post)",
+            "tier": "Budget postal",
+            "freight": 87.03,
+            "fuel": 0,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 1.17,
+            "customs": 3,
+            "total": 114.63,
+            "daysMin": 10,
+            "daysMax": 16,
+            "tracking": "Basic milestone tracking",
+            "features": [
+              "Lowest headline price",
+              "Widely available at local post offices"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "forwarder",
+            "name": "Meridian Freight (forwarder)",
+            "tier": "Freight forwarder",
+            "freight": 110.34,
+            "fuel": 11.03,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 2,
+            "customs": 0,
+            "total": 146.8,
+            "daysMin": 8,
+            "daysMax": 12,
+            "tracking": "Tracking + human support",
+            "features": [
+              "Accepts documented food shipments",
+              "Helps split complex shipments"
+            ],
+            "customsIncluded": "Concierge customs prep included",
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          }
+        ],
+        "chargeableKg": 12.55,
+        "packagingCost": 11.8,
+        "duties": 11.63,
+        "fees": 0,
+        "declaredTotal": 117,
+        "dutyLines": [
+          {
+            "item": "Packaged snacks & sweets",
+            "value": 40,
+            "rate": 0.05,
+            "duty": 2
+          },
+          {
+            "item": "Pickles & preserves (homemade)",
+            "value": 12,
+            "rate": 0.086,
+            "duty": 1.03
+          },
+          {
+            "item": "Clothing & wearables",
+            "value": 45,
+            "rate": 0.16,
+            "duty": 7.2
+          },
+          {
+            "item": "Gift items & souvenirs",
+            "value": 20,
+            "rate": 0.07,
+            "duty": 1.4
+          }
+        ]
+      },
+      "savedAt": "2026-10-09T20:08:44.270Z"
+    },
+    {
+      "id": "shp_mv1e4gs5href",
+      "view": "wizard",
+      "step": 4,
+      "segment": "consumer",
+      "originCountry": "IN",
+      "origin": "Hyderabad",
+      "dest": "Austin, TX",
+      "corridor": "IN-US",
+      "narrative": "I'm shipping 5 kg of snacks, 2 pickle jars, and 3 kg of clothes from Hyderabad to Austin",
+      "items": [
+        {
+          "uid": "it_i1pcamo",
+          "desc": "Packaged snacks & sweets",
+          "qty": 5,
+          "unit": "kg",
+          "weightKg": 5,
+          "valueUsd": 40,
+          "ruleId": "snacks",
+          "source": "demo"
+        },
+        {
+          "uid": "it_j2hqo1b",
+          "desc": "Pickles & preserves (homemade)",
+          "qty": 2,
+          "unit": "jar",
+          "weightKg": 1,
+          "valueUsd": 12,
+          "ruleId": "pickles",
+          "source": "demo"
+        },
+        {
+          "uid": "it_072143y",
+          "desc": "Clothing & wearables",
+          "qty": 3,
+          "unit": "kg",
+          "weightKg": 3,
+          "valueUsd": 45,
+          "ruleId": "clothes",
+          "source": "demo"
+        },
+        {
+          "uid": "it_hab66uo",
+          "desc": "Gift items & souvenirs",
+          "qty": 2,
+          "unit": "piece",
+          "weightKg": 1,
+          "valueUsd": 20,
+          "ruleId": "gifts",
+          "source": "demo"
+        }
+      ],
+      "pending": [],
+      "photoNames": [],
+      "optMode": "balance",
+      "chosen": "ups-saver",
+      "checklist": {},
+      "feedbackDone": true,
+      "updatedAt": "2026-10-09T20:02:39.724Z",
+      "packing": {
+        "boxes": [
+          {
+            "seq": 1,
+            "boxId": "S",
+            "boxName": "Small box",
+            "dimsIn": [
+              10,
+              8,
+              6
+            ],
+            "tareKg": 0.3,
+            "group": "padded",
+            "groupNote": "Packed with double cushioning, sealed liners for liquids, and “Fragile” labels on all sides.",
+            "forced": false,
+            "contents": [
+              "Pickles & preserves (homemade) ×2"
+            ],
+            "actualKg": 1.3,
+            "dimKg": 1.57,
+            "chargeableKg": 1.57,
+            "utilization": 14
+          },
+          {
+            "seq": 2,
+            "boxId": "M",
+            "boxName": "Medium box",
+            "dimsIn": [
+              14,
+              12,
+              10
+            ],
+            "tareKg": 0.5,
+            "group": "food",
+            "groupNote": "Food is packed away from clothing and electronics, in a liner bag, sealed tight to keep smells and spills in.",
+            "forced": false,
+            "contents": [
+              "Packaged snacks & sweets ×5"
+            ],
+            "actualKg": 5.5,
+            "dimKg": 5.48,
+            "chargeableKg": 5.5,
+            "utilization": 29
+          },
+          {
+            "seq": 3,
+            "boxId": "M",
+            "boxName": "Medium box",
+            "dimsIn": [
+              14,
+              12,
+              10
+            ],
+            "tareKg": 0.5,
+            "group": "general",
+            "groupNote": "Soft goods are folded tight to save space; heavier items sit at the bottom.",
+            "forced": false,
+            "contents": [
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2"
+            ],
+            "actualKg": 4.5,
+            "dimKg": 5.48,
+            "chargeableKg": 5.48,
+            "utilization": 73
+          }
+        ],
+        "materials": {
+          "boxes": [
+            {
+              "label": "Small box",
+              "n": 1
+            },
+            {
+              "label": "Medium box",
+              "n": 2
+            }
+          ],
+          "tapeRolls": 2,
+          "bubbleWrapRolls": 1,
+          "linerBags": 1,
+          "labels": 6
+        },
+        "notes": [],
+        "splitHint": "Three or more boxes: many forwarders price 2+ box shipments better than couriers, and separate food boxes reduce inspection risk for the rest of your shipment.",
+        "groups": [
+          {
+            "key": "padded",
+            "label": "Fragile & liquids",
+            "weightKg": 1,
+            "items": [
+              "Pickles & preserves (homemade) ×2"
+            ]
+          },
+          {
+            "key": "food",
+            "label": "Food items",
+            "weightKg": 5,
+            "items": [
+              "Packaged snacks & sweets ×5"
+            ]
+          },
+          {
+            "key": "general",
+            "label": "Clothing & general",
+            "weightKg": 4,
+            "items": [
+              "Clothing & wearables ×3",
+              "Gift items & souvenirs ×2"
+            ]
+          }
+        ]
+      },
+      "cost": {
+        "quotes": [
+          {
+            "carrierId": "dhl",
+            "name": "DHL Express Worldwide",
+            "tier": "Express courier",
+            "freight": 161.23,
+            "fuel": 19.35,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 12,
+            "total": 219.01,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Door pickup included",
+              "Customs paperwork handled online"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "fedex-econ",
+            "name": "FedEx International Economy",
+            "tier": "Balanced courier",
+            "freight": 137.91,
+            "fuel": 16.55,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 10,
+            "total": 190.89,
+            "daysMin": 5,
+            "daysMax": 7,
+            "tracking": "Full tracking with delivery alerts",
+            "features": [
+              "Good price/speed balance",
+              "Paperless invoice supported"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "ups-saver",
+            "name": "UPS Worldwide Saver",
+            "tier": "Express courier",
+            "freight": 152.95,
+            "fuel": 19.12,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 3,
+            "customs": 11,
+            "total": 209.5,
+            "daysMin": 3,
+            "daysMax": 5,
+            "tracking": "Full door-to-door tracking",
+            "features": [
+              "Early-day delivery option",
+              "Strong US customs brokerage"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "post-ems",
+            "name": "National Post EMS (Speed Post)",
+            "tier": "Budget postal",
+            "freight": 87.03,
+            "fuel": 0,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 1.17,
+            "customs": 3,
+            "total": 114.63,
+            "daysMin": 10,
+            "daysMax": 16,
+            "tracking": "Basic milestone tracking",
+            "features": [
+              "Lowest headline price",
+              "Widely available at local post offices"
+            ],
+            "customsIncluded": null,
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          },
+          {
+            "carrierId": "forwarder",
+            "name": "Meridian Freight (forwarder)",
+            "tier": "Freight forwarder",
+            "freight": 110.34,
+            "fuel": 11.03,
+            "packaging": 11.8,
+            "duties": 11.63,
+            "fees": 0,
+            "insurance": 2,
+            "customs": 0,
+            "total": 146.8,
+            "daysMin": 8,
+            "daysMax": 12,
+            "tracking": "Tracking + human support",
+            "features": [
+              "Accepts documented food shipments",
+              "Helps split complex shipments"
+            ],
+            "customsIncluded": "Concierge customs prep included",
+            "quoteLabel": "Illustrative estimate — request a live quote"
+          }
+        ],
+        "chargeableKg": 12.55,
+        "packagingCost": 11.8,
+        "duties": 11.63,
+        "fees": 0,
+        "declaredTotal": 117,
+        "dutyLines": [
+          {
+            "item": "Packaged snacks & sweets",
+            "value": 40,
+            "rate": 0.05,
+            "duty": 2
+          },
+          {
+            "item": "Pickles & preserves (homemade)",
+            "value": 12,
+            "rate": 0.086,
+            "duty": 1.03
+          },
+          {
+            "item": "Clothing & wearables",
+            "value": 45,
+            "rate": 0.16,
+            "duty": 7.2
+          },
+          {
+            "item": "Gift items & souvenirs",
+            "value": 20,
+            "rate": 0.07,
+            "duty": 1.4
+          }
+        ]
+      },
+      "savedAt": "2026-10-09T20:02:40.527Z"
+    }
+  ],
+  "feedback": [
+    {
+      "shipmentId": "shp_mv1e4gs5href",
+      "segment": "consumer",
+      "carrier": "UPS Worldwide Saver",
+      "estimatedCost": 210,
+      "actualCost": 238,
+      "delay": "",
+      "inspected": "yes",
+      "damage": "none",
+      "comments": "Pickles got opened at customs but arrived fine.",
+      "id": "fb_mv1e6s4h",
+      "submittedAt": "2026-10-09T20:02:39.713Z",
+      "unverified": true
+    },
+    {
+      "shipmentId": "shp_mv19l1gzcl0z",
+      "segment": "consumer",
+      "carrier": "DHL Express Worldwide",
+      "estimatedCost": 210,
+      "actualCost": 224,
+      "delay": "none",
+      "inspected": "no",
+      "damage": "none",
+      "comments": "Pickles were questioned at customs but arrived; snacks fine.",
+      "id": "fb_mv19nglg",
+      "submittedAt": "2026-10-09T17:55:39.844Z",
+      "unverified": true
+    }
+  ],
+  "quotes": [],
+  "ruleOverrides": null,
+  "rateOverrides": null,
+  "metaUpdatedAt": "2026-10-09"
+}
