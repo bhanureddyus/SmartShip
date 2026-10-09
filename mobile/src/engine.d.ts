@@ -37,14 +37,6 @@ export interface Item {
   source: string;
 }
 
-export interface ParsedItem {
-  uid: string;
-  desc: string;
-  qty: number;
-  unit: string;
-  weightKg: number | null;
-}
-
 export interface ParsedRoute {
   origin: string | null;
   dest: string;
@@ -54,7 +46,7 @@ export interface ParsedRoute {
 
 export interface ParsedNarrative {
   route: ParsedRoute | null;
-  items: ParsedItem[];
+  items: Item[]; // already built via makeItem(), source 'parsed'
   unknown: string[];
   raw: string;
 }
@@ -215,6 +207,7 @@ export interface Seed {
   itemRules: ItemRule[];
   boxes: BoxSpec[];
   carriers: Carrier[];
+  photoPool: { desc: string; qty: number; unit: string; weightKg: number; valueUsd: number; ruleId: string }[];
   demo: {
     id: string;
     route: { originCountry: 'IN' | 'CN'; origin: string; dest: string; corridor: string };

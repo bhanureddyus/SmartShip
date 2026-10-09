@@ -150,6 +150,15 @@ export async function uploadPhoto(shipmentId: string, role: ReportRole, body: Bl
   return r.path;
 }
 
+// Receiver photos: the share context never exposes shipmentId, so the receiver
+// page uploads through the token. Route added by the web frontend PR on the
+// same release branch; same raw-bytes contract and `{ ok, path }` reply.
+export async function uploadReceiverPhoto(token: string, body: Blob | ArrayBuffer, mime: PhotoMime): Promise<string> {
+  const res = await fetch(apiBase() + `/api/share/${encodeURIComponent(token)}/photo`, { method: 'POST', headers: { 'Content-Type': mime }, body });
+  const r = await parseJson<{ ok: true; path: string }>(res);
+  return r.path;
+}
+
 export function photoUrl(path: string): string {
   return path.startsWith('http') ? path : apiBase() + path;
 }
