@@ -5,7 +5,9 @@
   "description": "Ship2US — cross-border shipping guidance (India → US) for consumers and small businesses",
   "scripts": {
     "start": "node server.js",
-    "test": "node test-engine.js"
+    "test": "node test-engine.js && node test-server.js",
+    "test:engine": "node test-engine.js",
+    "test:server": "node test-server.js"
   },
   "engines": {
     "node": ">=20"

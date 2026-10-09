@@ -201,3 +201,7 @@ const SEED = {
 
 // Default declared-value heuristics per kg/unit used when a rule has neither
 const VALUE_DEFAULTS = { perKg: 12, perUnit: 10 };
+
+// CommonJS tail so Node and the mobile bundler can `require` the seed; the
+// browser keeps the `SEED` / `VALUE_DEFAULTS` globals above.
+if (typeof module !== 'undefined' && module.exports) module.exports = { SEED, VALUE_DEFAULTS };

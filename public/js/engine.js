@@ -6,6 +6,14 @@
 
 const Engine = (() => {
 
+  // Seed data: the `SEED` global from data.js in the browser (and the concatenating
+  // test runner), or the sibling module under CommonJS (Node server, Metro).
+  const DATA = typeof SEED !== 'undefined'
+    ? { SEED, VALUE_DEFAULTS }
+    : (typeof require === 'function' ? require('./data.js') : { SEED: null, VALUE_DEFAULTS: null });
+  const seed = DATA.SEED;
+  const valueDefaults = DATA.VALUE_DEFAULTS;
+
   const LB_PER_KG = 2.20462;
   const KG_PER_LB = 0.453592;
   const DIM_DIVISOR = 139; // imperial divisor: inches → pounds
@@ -156,7 +164,7 @@ const Engine = (() => {
   function matchRule(name) {
     const n = ' ' + name.toLowerCase() + ' ';
     let best = null, bestLen = 0;
-    for (const rule of SEED.itemRules) {
+    for (const rule of seed.itemRules) {
       for (const kw of rule.keywords) {
         if (n.includes(kw) && kw.length > bestLen) { best = rule; bestLen = kw.length; }
       }
@@ -165,11 +173,11 @@ const Engine = (() => {
   }
 
   function estimateValue(rule, weightKg, qty, unit) {
-    if (!rule) return round2(qty * (VALUE_DEFAULTS.perUnit));
+    if (!rule) return round2(qty * (valueDefaults.perUnit));
     if (unit === 'kg' || unit === 'l') {
-      return round2(weightKg * (rule.valuePerKg || VALUE_DEFAULTS.perKg));
+      return round2(weightKg * (rule.valuePerKg || valueDefaults.perKg));
     }
-    return round2(qty * (rule.valuePerUnit || VALUE_DEFAULTS.perUnit));
+    return round2(qty * (rule.valuePerUnit || valueDefaults.perUnit));
   }
 
   function makeItem(desc, qty, unit, weightKg, rule, source) {
@@ -215,7 +223,7 @@ const Engine = (() => {
   // ---------- 3. Packing planner ----------
   // Separation rule: fragile/liquids → padded box; food → food box; general → general box
   function planPacking(items, boxes, rules) {
-    rules = rules || SEED.itemRules;
+    rules = rules || seed.itemRules;
     const groups = { padded: [], food: [], general: [] };
     for (const it of items) {
       const rule = rules.find(r => r.id === it.ruleId);
@@ -325,10 +333,10 @@ const Engine = (() => {
   const MPF = { rate: 0.003464, min: 31.67, max: 614.35 }; // merchandise processing fee (formal entries)
 
   function costQuotes(boxes, items, carriers, corridor, segment, rules) {
-    rules = rules || SEED.itemRules;
+    rules = rules || seed.itemRules;
     const chargeableKg = boxes.reduce((s, b) => s + b.chargeableKg, 0);
     const packagingCost = boxes.reduce((s, b) => {
-      const box = SEED.boxes.find(x => x.id === b.boxId);
+      const box = seed.boxes.find(x => x.id === b.boxId);
       const cushion = b.group === 'padded' ? 4 : 1.5;
       return s + (box ? box.cost : 2) + cushion;
     }, 0);
@@ -380,5 +388,69 @@ const Engine = (() => {
     return eligible.reduce((a, b) => (score(b) < score(a) ? b : a));
   }
 
-  return { parseNarrative, matchRule, makeItem, eligibilityFor, planPacking, costQuotes, pickBest, round2, DIM_DIVISOR };
+  // ---------- 6. Community insight roll-up ----------
+  // Pure function over community reports. Insight is shown BESIDE eligibility,
+  // packing and cost — it never feeds any of those paths. Reports are always
+  // unverified community input; callers must render the unverified badge.
+  const INSIGHT_MIN_REPORTS = 3;        // below this a rule shows the "be the first family" empty state
+  const INSIGHT_MAX_RULE_STORIES = 2;   // newest first
+  const INSIGHT_MAX_CORRIDOR_STORIES = 3; // landing-page strip
+  const INSIGHT_MAX_PHOTOS = 3;
+  // Stories hinting that a parcel was refused/seized — only a hint, never a verdict.
+  const REFUSED_HINT_RE = /\b(refus|reject|seiz|confiscat|destroy|returned to sender)/i;
+
+  function insightFor(reports, corridor, ruleIds) {
+    const newestFirst = (a, b) => String(b.submittedAt || '').localeCompare(String(a.submittedAt || ''));
+    const visible = (Array.isArray(reports) ? reports : [])
+      .filter(r => r && !r.hidden && (!corridor || r.corridor === corridor))
+      .sort(newestFirst);
+
+    const isNum = v => typeof v === 'number' && Number.isFinite(v);
+    const hasStory = r => typeof r.story === 'string' && r.story.trim().length > 0;
+    const hasCondition = (r, c) => Array.isArray(r.condition) && r.condition.includes(c);
+    const storiesOf = (rs, max) => rs.filter(hasStory).slice(0, max).map(r => ({
+      story: r.story.trim(), role: r.role, stage: r.stage,
+      senderName: r.senderName || null, submittedAt: r.submittedAt
+    }));
+    const photosOf = rs => rs.flatMap(r => (Array.isArray(r.photos) ? r.photos : [])).slice(0, INSIGHT_MAX_PHOTOS);
+    const countWhere = (rs, pred) => rs.reduce((n, r) => n + (pred(r) ? 1 : 0), 0);
+
+    const rules = {};
+    for (const id of (Array.isArray(ruleIds) ? ruleIds : [])) {
+      const rs = visible.filter(r => Array.isArray(r.ruleIds) && r.ruleIds.includes(id));
+      if (rs.length < INSIGHT_MIN_REPORTS) { rules[id] = { reports: rs.length, sparse: true }; continue; }
+      rules[id] = {
+        reports: rs.length,
+        sparse: false,
+        yes: countWhere(rs, r => r.verdict === 'yes'),
+        notQuite: countWhere(rs, r => r.verdict === 'not_quite'),
+        openedByCustoms: countWhere(rs, r => hasCondition(r, 'opened_by_customs')),
+        damaged: countWhere(rs, r => hasCondition(r, 'damaged')),
+        missing: countWhere(rs, r => hasCondition(r, 'missing')),
+        refusedHint: countWhere(rs, r => hasStory(r) && REFUSED_HINT_RE.test(r.story)),
+        stories: storiesOf(rs, INSIGHT_MAX_RULE_STORIES),
+        photos: photosOf(rs)
+      };
+    }
+
+    // A cost sample needs BOTH an estimate and a real paid amount; a blank "what you paid" (0) is not a sample.
+    const costSamples = visible
+      .filter(r => isNum(r.estimatedCost) && isNum(r.actualCost) && r.estimatedCost > 0 && r.actualCost > 0)
+      .map(r => ({ estimated: r.estimatedCost, actual: r.actualCost, carrier: r.carrier || null, submittedAt: r.submittedAt }));
+
+    return {
+      corridor: corridor || null,
+      reports: visible.length,
+      rules,
+      costSamples,
+      stories: storiesOf(visible, INSIGHT_MAX_CORRIDOR_STORIES),
+      photos: photosOf(visible)
+    };
+  }
+
+  return { parseNarrative, matchRule, makeItem, eligibilityFor, planPacking, costQuotes, pickBest, insightFor, round2, DIM_DIVISOR, INSIGHT_MIN_REPORTS };
 })();
+
+// CommonJS tail so the Node server, the test runner and the mobile bundler can
+// `require` this file; the browser keeps the `Engine` global above.
+if (typeof module !== 'undefined' && module.exports) module.exports = { Engine };
