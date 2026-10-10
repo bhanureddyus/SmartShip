@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Ship2US",
+    "slug": "ship2us",
+    "version": "0.1.0",
+    "scheme": "ship2us",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "ai.obvious.ship2us"
+    },
+    "android": {
+      "package": "ai.obvious.ship2us",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro",
+      "output": "single"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Ship2US uses your photos so you can attach a picture of your boxes to a community report.",
+          "cameraPermission": "Ship2US uses the camera so you can photograph your boxes for a community report."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

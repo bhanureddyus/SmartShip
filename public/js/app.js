@@ -36,7 +36,10 @@
       optMode: 'balance',
       chosen: null,
       checklist: {},
-      feedbackDone: false,
+      feedbackDone: false,   // legacy flag from the six-field form; `reported.ship` supersedes it
+      reported: {},          // stage → 'sent' | 'queued' — a stage never re-asks on this shipment
+      pendingReports: [],    // sender reports captured while the API was unreachable; boot() flushes
+      share: null,           // { token, url } once the receiver link exists
       updatedAt: null
     };
   }
@@ -134,12 +137,16 @@
     if (fm) fm.textContent = 'Demo data · updated ' + dataUpdated();
     if (offline) showToast('Offline demo mode — your draft saves to this browser only.');
     route();
+    flushPendingReports().then(flushed => { if (flushed) route(); });
   }
 
   // ---------- router ----------
   function route() {
     const hash = location.hash || '#/';
     const root = document.getElementById('appRoot');
+    const receiverMatch = hash.match(/^#\/r\/([A-Za-z0-9_-]+)$/);
+    setChrome(!receiverMatch);
+    if (receiverMatch) { renderReceiver(root, receiverMatch[1]); return; }
     document.getElementById('navAdmin').classList.toggle('active', hash.startsWith('#/admin'));
     document.getElementById('navAbout').classList.toggle('active', hash.startsWith('#/about'));
     if (hash.startsWith('#/admin')) { Admin.render(root); return; }
@@ -152,6 +159,559 @@
     renderLanding(root);
   }
   window.addEventListener('hashchange', route);
+
+  // ---------- COMMUNITY: reports, photos, insight ----------
+  // Community input is UNVERIFIED and sits beside engine output; nothing in this
+  // section feeds eligibility, packing or cost. Every insight render goes through
+  // renderInsight/renderCostInsight so the badge can never be omitted by a caller.
+  const STORY_MAX = 280;
+  const PHOTOS_MAX = 4;
+  const PHOTO_MAX_EDGE = 1600;
+  const SENDER_NAME_MAX = 24;
+  const INSIGHT_MIN = Engine.INSIGHT_MIN_REPORTS || 3;
+  const LS_SENDER_NAME = 'ship2us_sender_name';
+  const UNVERIFIED_BADGE = '<span class="badge badge-warning">Community input · unverified</span>';
+
+  async function postJSON(url, body) {
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    let j;
+    try { j = await r.json(); } catch (e) { j = { ok: false, error: 'Unexpected response from the demo service' }; }
+    return { status: r.status, ...j };
+  }
+
+  // Every report and photo is keyed to a saved shipment row, so flush the debounced save first.
+  async function ensureShipmentSaved() { clearTimeout(saveTimer); await persistServer(); }
+
+  function reportStatus(stage) { return (state.reported || {})[stage] || null; }
+
+  // Posts one sender report for a stage. A network failure queues it on this device
+  // (flushed by boot()); a server rejection is shown to the user and never queued.
+  async function submitReport(stage, fields) {
+    const report = { shipmentId: state.id, role: 'sender', stage, ...fields };
+    let res;
+    try {
+      await ensureShipmentSaved();
+      res = await postJSON('/api/report', { report });
+    } catch (e) {
+      offline = true;
+      state.pendingReports = (state.pendingReports || []).concat([report]);
+      state.reported[stage] = 'queued';
+      saveState();
+      return 'queued';
+    }
+    if (!res.ok) { showToast(`Couldn’t send that: ${res.error || 'please try again'}.`); return null; }
+    offline = false;
+    state.reported[stage] = 'sent';
+    saveState();
+    return res.report;
+  }
+
+  // Re-sends reports captured offline. Returns true when any status changed so the
+  // caller can re-render. A 4xx means the report is invalid now — drop it and re-ask.
+  async function flushPendingReports() {
+    const pending = state.pendingReports || [];
+    if (!pending.length) return false;
+    await ensureShipmentSaved();
+    const keep = [];
+    for (const report of pending) {
+      try {
+        const res = await postJSON('/api/report', { report });
+        if (res.ok) state.reported[report.stage] = 'sent';
+        else if (res.status >= 500) keep.push(report);
+        else delete state.reported[report.stage];
+      } catch (e) { keep.push(report); }
+    }
+    state.pendingReports = keep;
+    saveState();
+    const changed = keep.length !== pending.length;
+    if (changed) showToast('Your saved reports were sent — thank you.');
+    return changed;
+  }
+
+  // --- photo picker ---
+  function renderPhotoPicker({ max = PHOTOS_MAX } = {}) {
+    return `<div class="photo-picker" data-max="${max}">
+      <label class="chip chip-ghost photo-add">${I.camera} Add photos<input type="file" accept="image/*" capture="environment" multiple hidden></label>
+      <div class="photo-thumbs" aria-live="polite"></div>
+    </div>`;
+  }
+
+  // Binds a rendered picker. Uploads start on selection and run while the user keeps
+  // typing; the controller tells the caller when it is safe to send.
+  function bindPhotoPicker(el, { onChange } = {}) {
+    const max = +el.dataset.max || PHOTOS_MAX;
+    const thumbs = el.querySelector('.photo-thumbs');
+    const input = el.querySelector('input[type="file"]');
+    const photos = []; // { uid, url, path, status: 'uploading' | 'done' | 'failed' }
+    const ctl = {
+      get paths() { return photos.filter(p => p.status === 'done').map(p => p.path); },
+      get busy() { return photos.some(p => p.status === 'uploading'); }
+    };
+    const countUsable = () => photos.filter(p => p.status !== 'failed').length;
+    function paint() {
+      thumbs.innerHTML = photos.map(p => `<figure class="photo-thumb ${p.status}" data-uid="${p.uid}">
+        <img src="${p.url}" alt="${p.status === 'failed' ? 'Photo that could not be added' : 'Selected photo'}">
+        <button type="button" class="photo-x" aria-label="Remove photo">×</button>
+        ${p.status === 'failed' ? '<figcaption>Couldn’t add this one</figcaption>' : ''}
+      </figure>`).join('');
+      el.querySelector('.photo-add').classList.toggle('is-full', countUsable() >= max);
+      if (onChange) onChange(ctl);
+    }
+    thumbs.addEventListener('click', e => {
+      const x = e.target.closest('.photo-x'); if (!x) return;
+      const i = photos.findIndex(p => p.uid === x.closest('.photo-thumb').dataset.uid);
+      if (i < 0) return;
+      URL.revokeObjectURL(photos[i].url);
+      photos.splice(i, 1);
+      paint();
+    });
+    input.addEventListener('change', () => {
+      const files = Array.from(input.files || []).slice(0, Math.max(0, max - countUsable()));
+      input.value = '';
+      if (!files.length) { showToast(`Up to ${max} photos per report.`); return; }
+      for (const file of files) {
+        const p = { uid: 'ph_' + Math.random().toString(36).slice(2, 8), url: URL.createObjectURL(file), path: null, status: 'uploading' };
+        photos.push(p);
+        uploadPhoto(file).then(path => { p.path = path; p.status = 'done'; }, () => { p.status = 'failed'; }).then(paint);
+      }
+      paint();
+    });
+    return ctl;
+  }
+
+  // Downscale on the client so a 12 MB phone shot never meets the server's 4 MB cap, then send raw bytes.
+  async function uploadPhoto(file) {
+    const blob = await downscaleImage(file, PHOTO_MAX_EDGE);
+    await ensureShipmentSaved();
+    const r = await fetch(`/api/photo?shipmentId=${encodeURIComponent(state.id)}&role=sender`, { method: 'POST', headers: { 'Content-Type': blob.type }, body: blob });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'Upload rejected');
+    return j.path;
+  }
+
+  async function downscaleImage(file, maxEdge) {
+    const bitmap = await createImageBitmap(file); // rejects for non-images → the thumb shows "Couldn’t add this one"
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale)), h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+    if (bitmap.close) bitmap.close();
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+    if (!blob) throw new Error('Could not encode the image');
+    return blob;
+  }
+
+  // --- quick-tap strip (Check, Pack, Cost) ---
+  function renderQuickTap({ stage, status }) {
+    if (status === 'sent') return `<div class="qtap qtap-done">${I.check} Thanks — noted for the next family.</div>`;
+    if (status === 'queued') return `<div class="qtap qtap-done">${I.info} Saved on this device — we’ll send it when you’re back online.</div>`;
+    return `<div class="qtap" data-stage="${stage}">
+      <div class="qtap-row">
+        <span class="qtap-q">Does this match what you’ve seen?</span>
+        <button type="button" class="chip" data-verdict="yes">Yes</button>
+        <button type="button" class="chip" data-verdict="not_quite">Not quite</button>
+        <button type="button" class="chip chip-ghost" data-act="story">Tell a story</button>
+      </div>
+      <div class="qtap-story" hidden>
+        <input class="input" maxlength="${STORY_MAX}" placeholder="One line for the next family" aria-label="One line for the next family">
+        ${renderPhotoPicker({ max: PHOTOS_MAX })}
+        <div class="row"><button type="button" class="btn btn-primary btn-sm" data-act="send">Send</button><span class="fine">Shown to other families as unverified community input.</span></div>
+      </div>
+    </div>`;
+  }
+
+  // Mounts the strip for a stage into its host and re-renders it after an answer.
+  function mountQuickTap(host, stage) {
+    host.innerHTML = renderQuickTap({ stage, status: reportStatus(stage) });
+    const strip = host.querySelector('.qtap[data-stage]');
+    if (!strip) return;
+    const storyBox = strip.querySelector('.qtap-story');
+    const sendBtn = strip.querySelector('[data-act="send"]');
+    const picker = bindPhotoPicker(strip.querySelector('.photo-picker'), { onChange: c => { sendBtn.disabled = c.busy; } });
+    const setBusy = busy => strip.querySelectorAll('button').forEach(b => { b.disabled = busy; });
+    const finish = async fields => {
+      setBusy(true);
+      const out = await submitReport(stage, fields);
+      if (out) mountQuickTap(host, stage); else setBusy(false);
+    };
+    strip.querySelectorAll('[data-verdict]').forEach(b => b.addEventListener('click', () => finish({ verdict: b.dataset.verdict })));
+    strip.querySelector('[data-act="story"]').addEventListener('click', () => {
+      storyBox.hidden = !storyBox.hidden;
+      if (!storyBox.hidden) storyBox.querySelector('input').focus();
+    });
+    sendBtn.addEventListener('click', () => {
+      const story = storyBox.querySelector('input').value.trim().slice(0, STORY_MAX);
+      if (!story && !picker.paths.length) { showToast('Add a line or a photo first.'); return; }
+      finish({ story: story || undefined, photos: picker.paths });
+    });
+  }
+
+  // --- insight (read-only roll-up of community reports) ---
+  // One fetch per corridor + rule set for this page session; a reload refetches so
+  // fresh reports show up. The cache is deliberately not persisted with the draft.
+  const insightCache = {}; // key → { promise, data }
+  function ruleIdsOf(items) { return [...new Set(items.map(i => i.ruleId).filter(Boolean))]; }
+  function insightEntry(corridor, ruleIds) {
+    const key = corridor + '|' + ruleIds.join(',');
+    if (!insightCache[key]) {
+      const entry = { data: undefined };
+      entry.promise = fetch(`/api/insight?corridor=${encodeURIComponent(corridor)}&ruleIds=${encodeURIComponent(ruleIds.join(','))}`)
+        .then(r => r.json()).then(j => (j.ok ? j.insight : null))
+        .catch(() => null)
+        .then(data => { entry.data = data; if (data === null) delete insightCache[key]; return data; });
+      insightCache[key] = entry;
+    }
+    return insightCache[key];
+  }
+
+  function renderInsight(ins) {
+    if (ins === null) return `<div class="insight insight-empty">${UNVERIFIED_BADGE}<span>Community reports aren’t reachable right now.</span></div>`;
+    if (ins === undefined) return `<div class="insight insight-empty">${UNVERIFIED_BADGE}<span>Loading what families reported…</span></div>`;
+    if (!ins || ins.sparse || !(ins.reports >= INSIGHT_MIN)) {
+      const n = ins && ins.reports ? ins.reports : 0;
+      const line = n ? `${n} famil${n === 1 ? 'y has' : 'ies have'} reported so far — a few more and we’ll show what they said.` : 'Be the first family to report on this.';
+      return `<div class="insight insight-empty">${UNVERIFIED_BADGE}<span>${line}</span></div>`;
+    }
+    const facts = [
+      `${ins.reports} families`,
+      ins.yes ? `${ins.yes} said it matched` : null,
+      ins.notQuite ? `${ins.notQuite} said not quite` : null,
+      ins.openedByCustoms ? `${ins.openedByCustoms} opened at customs` : null,
+      ins.damaged ? `${ins.damaged} damaged` : null,
+      ins.missing ? `${ins.missing} missing` : null,
+      ins.refusedHint ? `${ins.refusedHint} mention a refusal` : null
+    ].filter(Boolean).join(' · ');
+    const s = ins.stories && ins.stories[0];
+    const story = s ? `<q class="insight-story">${esc(s.story)}</q>${s.senderName ? `<span class="insight-by">— ${esc(s.senderName)}</span>` : ''}` : '';
+    const photos = (ins.photos || []).map(p => `<img class="insight-thumb" src="${esc(p)}" alt="Community photo" loading="lazy">`).join('');
+    return `<div class="insight">${UNVERIFIED_BADGE}<div class="insight-facts">${facts}</div>${story}${photos ? `<div class="insight-photos">${photos}</div>` : ''}</div>`;
+  }
+
+  // Cost line under a quote: this carrier's samples first, corridor-wide as the fallback.
+  function renderCostInsight(samples, carrierName, estimate) {
+    if (samples === null) return renderInsight(null);
+    if (samples === undefined) return renderInsight(undefined);
+    const mine = samples.filter(s => s.carrier && s.carrier.toLowerCase() === String(carrierName).toLowerCase());
+    const pool = mine.length ? mine : samples;
+    if (!pool.length) return `<div class="insight insight-empty insight-cost">${UNVERIFIED_BADGE}<span>Be the first family to report what you paid.</span></div>`;
+    const lo = Math.min(...pool.map(s => s.actual)), hi = Math.max(...pool.map(s => s.actual));
+    const range = lo === hi ? money0(lo) : `${money0(lo)}–${money0(hi)}`;
+    const scope = mine.length ? 'families paid' : 'families on this corridor paid';
+    return `<div class="insight insight-cost">${UNVERIFIED_BADGE}<span>${scope} <b>${range}</b> vs our ${money0(estimate)} estimate (${pool.length} report${pool.length === 1 ? '' : 's'})</span></div>`;
+  }
+
+  // Fills every insight slot in a step body; `ins` undefined = loading, null = unreachable.
+  function fillInsightSlots(body, ins) {
+    body.querySelectorAll('.insight-slot[data-rule]').forEach(slot => {
+      // undefined/null pass through as loading/unreachable; a rule the server didn't roll up is simply sparse.
+      slot.innerHTML = renderInsight(ins ? ((ins.rules || {})[slot.dataset.rule] || { reports: 0, sparse: true }) : ins);
+    });
+    body.querySelectorAll('.insight-slot[data-carrier]').forEach(slot => {
+      slot.innerHTML = renderCostInsight(ins ? ins.costSamples : ins, slot.dataset.carrier, +slot.dataset.est);
+    });
+    bindInsightThumbs(body);
+  }
+  function loadStepInsight(body) {
+    const entry = insightEntry(state.corridor, ruleIdsOf(state.items));
+    fillInsightSlots(body, entry.data);
+    if (entry.data === undefined) entry.promise.then(data => { if (body.isConnected) fillInsightSlots(body, data); });
+  }
+  // Uploaded photos live on the demo disk and can vanish on a rebuild; show a neutral placeholder, not a broken image.
+  function bindInsightThumbs(root) {
+    root.querySelectorAll('img.insight-thumb').forEach(img => img.addEventListener('error', () => {
+      const ph = document.createElement('span');
+      ph.className = 'insight-thumb insight-thumb-missing';
+      ph.setAttribute('aria-label', 'Photo unavailable');
+      ph.innerHTML = I.camera;
+      img.replaceWith(ph);
+    }, { once: true }));
+  }
+
+  // Landing strip: shown only when at least three stories exist on the corridor.
+  function renderStoryStrip(ins) {
+    if (!ins || !Array.isArray(ins.stories) || ins.stories.length < 3) return '';
+    const when = s => s.role === 'receiver' ? 'on arrival' : s.stage === 'ship' ? 'at hand-over' : 'while planning';
+    const photos = (ins.photos || []).map(p => `<img class="insight-thumb" src="${esc(p)}" alt="Community photo" loading="lazy">`).join('');
+    return `<section class="story-strip" aria-label="From families like yours">
+      <div class="story-head"><span class="eyebrow">From families like yours</span>${UNVERIFIED_BADGE}</div>
+      <div class="story-cards">${ins.stories.slice(0, 3).map(s => `<figure class="story-card"><blockquote>${esc(s.story)}</blockquote><figcaption>${s.senderName ? esc(s.senderName) + ' · ' : ''}${when(s)}</figcaption></figure>`).join('')}</div>
+      ${photos ? `<div class="story-photos">${photos}</div>` : ''}
+    </section>`;
+  }
+
+  // --- hand-over report + share card (Ship) ---
+  function savedSenderName() { try { return localStorage.getItem(LS_SENDER_NAME) || ''; } catch (e) { return ''; } }
+  function rememberSenderName(name) { try { localStorage.setItem(LS_SENDER_NAME, name); } catch (e) { /* storage blocked — the server token still carries it */ } }
+
+  function renderHandoverReport(cost, chosen) {
+    const carriers = cost.quotes.map(q => q.name).concat(['Other']);
+    return `<div class="card" id="feedbackCard">
+      <div class="card-head"><span class="card-title">How did the hand-over go?</span>${UNVERIFIED_BADGE}</div>
+      <p class="muted" style="margin-bottom:var(--space-3);">Four taps and a line. The next family sees it as unverified community input — it never changes our rules or estimates.</p>
+      <div class="stack">
+        <div><div class="field-label" style="margin-bottom:6px;">Carrier you used</div><div class="row" id="hoCarrier">${carriers.map(n => `<button type="button" class="chip ${n === chosen.name ? 'active' : ''}" data-carrier="${esc(n)}">${esc(n)}</button>`).join('')}</div></div>
+        <div class="field" style="max-width:240px;"><label class="field-label" for="hoPaid">What you paid ($)</label><input class="input" id="hoPaid" type="number" inputmode="decimal" min="0" value="${Math.round(chosen.total)}"><span class="fine">Prefilled with our ${money0(chosen.total)} estimate — change it if yours differed.</span></div>
+        <div><div class="field-label" style="margin-bottom:6px;">How did it go?</div><div class="row" id="hoOutcome"><button type="button" class="chip" data-outcome="smooth">${I.check} Went smoothly</button><button type="button" class="chip" data-outcome="hiccup">${I.warn} Had a hiccup</button></div></div>
+        <div class="field"><label class="field-label" for="hoStory">One line for the next family (optional)</label><input class="input" id="hoStory" maxlength="${STORY_MAX}" placeholder="e.g. The pickle jars were opened at customs but made it."></div>
+        ${renderPhotoPicker({ max: PHOTOS_MAX })}
+        <div class="row"><button class="btn btn-primary" id="hoSend">Send report</button></div>
+      </div>
+    </div>`;
+  }
+
+  function renderShareCard(share, senderName) {
+    return `<div class="card share-card" id="feedbackCard">
+      <div class="card-head"><span class="card-title">${I.check} Thanks — now let the receiver tell us it arrived</span></div>
+      <p class="muted" style="margin-bottom:var(--space-4);">Send this link to whoever’s receiving the boxes. No app, no login — five quick taps on arrival, and the next family learns from it.</p>
+      <div class="share-grid">
+        <div class="stack">
+          <div class="field"><label class="field-label" for="shareName">Your first name (optional)</label><input class="input" id="shareName" maxlength="${SENDER_NAME_MAX}" placeholder="So they see “Bhanu sent you 3 boxes”" value="${esc(senderName)}"></div>
+          <div class="field"><label class="field-label" for="shareLink">Receiver link</label>
+            <div class="copy-row"><input class="input" readonly id="shareLink" value="${esc(share ? share.url : '')}" placeholder="Creating link…"><button class="btn btn-secondary" id="shareCopy" aria-label="Copy link" ${share ? '' : 'disabled'}>${I.copy}</button></div></div>
+          <div class="row"><button class="btn btn-primary" id="shareBtn" ${share ? '' : 'disabled'}>Share link</button><span class="fine">Single use · one report per shipment</span></div>
+        </div>
+        <div class="qr-wrap" id="shareQr">${share ? QR.toSvg(share.url) : '<div class="qr-pending">The QR code appears once the link is ready.</div>'}</div>
+      </div>
+    </div>`;
+  }
+
+  function mountHandoverReport(body, cost, chosen) {
+    const card = body.querySelector('#feedbackCard');
+    let carrier = chosen.name, outcome = null;
+    const sendBtn = card.querySelector('#hoSend');
+    const picker = bindPhotoPicker(card.querySelector('.photo-picker'), { onChange: c => { sendBtn.disabled = c.busy; } });
+    const pick = (groupId, attr, onPick) => card.querySelector(groupId).addEventListener('click', e => {
+      const b = e.target.closest(`[${attr}]`); if (!b) return;
+      onPick(b.getAttribute(attr));
+      card.querySelectorAll(`[${attr}]`).forEach(x => x.classList.toggle('active', x === b));
+    });
+    pick('#hoCarrier', 'data-carrier', v => { carrier = v; });
+    pick('#hoOutcome', 'data-outcome', v => { outcome = v; });
+    sendBtn.addEventListener('click', async () => {
+      if (!outcome) { showToast('Tap “Went smoothly” or “Had a hiccup” first.'); return; }
+      const paid = parseFloat(card.querySelector('#hoPaid').value);
+      const story = card.querySelector('#hoStory').value.trim().slice(0, STORY_MAX);
+      sendBtn.disabled = true;
+      const out = await submitReport('ship', {
+        carrier, outcome,
+        estimatedCost: Engine.round2(chosen.total),
+        actualCost: Number.isFinite(paid) && paid >= 0 ? paid : undefined,
+        story: story || undefined,
+        photos: picker.paths
+      });
+      if (!out) { sendBtn.disabled = false; return; }
+      state.feedbackDone = true;
+      saveState();
+      card.outerHTML = renderShareCard(state.share, savedSenderName());
+      mountShareCard(body);
+      showToast('Thank you — recorded as unverified community input.');
+    });
+  }
+
+  // Idempotent per shipment on the server: re-posting only updates the sender name.
+  async function createShare(senderName) {
+    await ensureShipmentSaved();
+    const res = await postJSON('/api/share', { shipmentId: state.id, senderName: senderName || undefined });
+    if (!res.ok) throw new Error(res.error || 'Could not create the link');
+    state.share = { token: res.token, url: res.url };
+    saveState();
+    return state.share;
+  }
+
+  function mountShareCard(body) {
+    const card = body.querySelector('#feedbackCard');
+    const nameInput = card.querySelector('#shareName');
+    const link = card.querySelector('#shareLink');
+    const qr = card.querySelector('#shareQr');
+    const copyBtn = card.querySelector('#shareCopy'), shareBtn = card.querySelector('#shareBtn');
+    const paint = () => { link.value = state.share.url; qr.innerHTML = QR.toSvg(state.share.url); copyBtn.disabled = shareBtn.disabled = false; };
+    const sync = async () => {
+      try { await createShare(nameInput.value.trim().slice(0, SENDER_NAME_MAX)); paint(); }
+      catch (e) {
+        qr.innerHTML = `<div class="qr-pending">Couldn’t reach the demo service to create the link. <button type="button" class="btn btn-ghost btn-sm" id="shareRetry">Try again</button></div>`;
+        qr.querySelector('#shareRetry').addEventListener('click', sync);
+      }
+    };
+    if (state.share) paint(); else sync();
+    nameInput.addEventListener('change', () => { rememberSenderName(nameInput.value.trim().slice(0, SENDER_NAME_MAX)); sync(); });
+    copyBtn.addEventListener('click', () => copyText(state.share.url));
+    shareBtn.addEventListener('click', async () => {
+      const url = state.share.url;
+      const text = `${nameInput.value.trim() || 'Someone'} sent you a shipment via Ship2US — tap to tell us when it arrives.`;
+      if (!navigator.share) { copyText(url); return; }
+      try { await navigator.share({ title: 'Ship2US — did it arrive?', text, url }); }
+      catch (e) { if (e && e.name !== 'AbortError') copyText(url); }
+    });
+  }
+
+  // ---------- QR encoder (byte mode, ECC level M) ----------
+  // Minimal port of the public-domain qrcodegen algorithm (Project Nayuki) so the
+  // share card needs no dependency. Output is an inline SVG of the dark modules.
+  const QR = (() => {
+    const ECC = { ordinal: 1, formatBits: 0 }; // level M
+    const ECC_CODEWORDS_PER_BLOCK = [
+      [-1, 7, 10, 15, 20, 26, 18, 20, 24, 30, 18, 20, 24, 26, 30, 22, 24, 28, 30, 28, 28, 28, 28, 30, 30, 26, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+      [-1, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26, 26, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28],
+      [-1, 13, 22, 18, 26, 18, 24, 18, 22, 20, 24, 28, 26, 24, 20, 30, 24, 28, 28, 26, 30, 28, 30, 30, 30, 30, 28, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30],
+      [-1, 17, 28, 22, 16, 22, 28, 26, 26, 24, 28, 24, 28, 22, 24, 24, 30, 28, 28, 26, 28, 30, 24, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30]
+    ];
+    const NUM_ECC_BLOCKS = [
+      [-1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 4, 6, 6, 6, 6, 7, 8, 8, 9, 9, 10, 12, 12, 12, 13, 14, 15, 16, 17, 18, 19, 19, 20, 21, 22, 24, 25],
+      [-1, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16, 17, 17, 18, 20, 21, 23, 25, 26, 28, 29, 31, 33, 35, 37, 38, 40, 43, 45, 47, 49],
+      [-1, 1, 1, 2, 2, 4, 4, 6, 6, 8, 8, 8, 10, 12, 16, 12, 17, 16, 18, 21, 20, 23, 23, 25, 27, 29, 34, 34, 35, 38, 40, 43, 45, 48, 51, 53, 56, 59, 62, 65, 68],
+      [-1, 1, 1, 2, 4, 4, 4, 5, 6, 8, 8, 11, 11, 16, 16, 18, 16, 19, 21, 25, 25, 25, 34, 30, 32, 35, 37, 40, 42, 45, 48, 51, 54, 57, 60, 63, 66, 70, 74, 77, 81]
+    ];
+    const MASKS = [
+      (x, y) => (x + y) % 2 === 0,
+      (x, y) => y % 2 === 0,
+      (x, y) => x % 3 === 0,
+      (x, y) => (x + y) % 3 === 0,
+      (x, y) => (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0,
+      (x, y) => (x * y) % 2 + (x * y) % 3 === 0,
+      (x, y) => ((x * y) % 2 + (x * y) % 3) % 2 === 0,
+      (x, y) => ((x + y) % 2 + (x * y) % 3) % 2 === 0
+    ];
+
+    function numRawDataModules(ver) {
+      let r = (16 * ver + 128) * ver + 64;
+      if (ver >= 2) { const n = Math.floor(ver / 7) + 2; r -= (25 * n - 10) * n - 55; if (ver >= 7) r -= 36; }
+      return r;
+    }
+    function numDataCodewords(ver) { return Math.floor(numRawDataModules(ver) / 8) - ECC_CODEWORDS_PER_BLOCK[ECC.ordinal][ver] * NUM_ECC_BLOCKS[ECC.ordinal][ver]; }
+    function alignmentPositions(ver) {
+      if (ver === 1) return [];
+      const n = Math.floor(ver / 7) + 2;
+      const step = ver === 32 ? 26 : Math.ceil((ver * 4 + 4) / (n * 2 - 2)) * 2;
+      const r = [6];
+      for (let p = ver * 4 + 17 - 7; r.length < n; p -= step) r.splice(1, 0, p);
+      return r;
+    }
+
+    // GF(2^8) with the QR reducing polynomial 0x11D.
+    function gfMul(x, y) { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z; }
+    function rsDivisor(degree) {
+      const r = Array(degree).fill(0); r[degree - 1] = 1;
+      let root = 1;
+      for (let i = 0; i < degree; i++) {
+        for (let j = 0; j < r.length; j++) { r[j] = gfMul(r[j], root); if (j + 1 < r.length) r[j] ^= r[j + 1]; }
+        root = gfMul(root, 2);
+      }
+      return r;
+    }
+    function rsRemainder(data, divisor) {
+      const r = Array(divisor.length).fill(0);
+      for (const b of data) { const f = b ^ r.shift(); r.push(0); divisor.forEach((c, i) => { r[i] ^= gfMul(c, f); }); }
+      return r;
+    }
+    function addEccAndInterleave(ver, data) {
+      const numBlocks = NUM_ECC_BLOCKS[ECC.ordinal][ver], blockEccLen = ECC_CODEWORDS_PER_BLOCK[ECC.ordinal][ver];
+      const rawCodewords = Math.floor(numRawDataModules(ver) / 8);
+      const numShortBlocks = numBlocks - rawCodewords % numBlocks;
+      const shortBlockLen = Math.floor(rawCodewords / numBlocks);
+      const divisor = rsDivisor(blockEccLen);
+      const blocks = [];
+      for (let i = 0, k = 0; i < numBlocks; i++) {
+        const dat = data.slice(k, k + shortBlockLen - blockEccLen + (i < numShortBlocks ? 0 : 1));
+        k += dat.length;
+        const ecc = rsRemainder(dat, divisor);
+        if (i < numShortBlocks) dat.push(0);
+        blocks.push(dat.concat(ecc));
+      }
+      const out = [];
+      for (let i = 0; i < blocks[0].length; i++) blocks.forEach((block, j) => { if (i !== shortBlockLen - blockEccLen || j >= numShortBlocks) out.push(block[i]); });
+      return out;
+    }
+
+    function penalty(m, size) {
+      let s = 0;
+      const runs = get => { for (let a = 0; a < size; a++) { let run = 1; for (let b = 1; b < size; b++) { if (get(a, b) === get(a, b - 1)) { run++; if (run === 5) s += 3; else if (run > 5) s++; } else run = 1; } } };
+      runs((y, x) => m[y][x]); runs((x, y) => m[y][x]);
+      for (let y = 0; y < size - 1; y++) for (let x = 0; x < size - 1; x++) { const c = m[y][x]; if (c === m[y][x + 1] && c === m[y + 1][x] && c === m[y + 1][x + 1]) s += 3; }
+      const P1 = [1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 0], P2 = [0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1];
+      const finderLike = get => { for (let a = 0; a < size; a++) for (let b = 0; b <= size - 11; b++) { let m1 = true, m2 = true; for (let k = 0; k < 11; k++) { const v = get(a, b + k) ? 1 : 0; if (v !== P1[k]) m1 = false; if (v !== P2[k]) m2 = false; } if (m1) s += 40; if (m2) s += 40; } };
+      finderLike((y, x) => m[y][x]); finderLike((x, y) => m[y][x]);
+      let dark = 0; m.forEach(row => row.forEach(v => { if (v) dark++; }));
+      const total = size * size;
+      s += (Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1) * 10;
+      return s;
+    }
+
+    function encode(text) {
+      const bytes = Array.from(new TextEncoder().encode(text));
+      let ver = 1;
+      while (ver <= 40 && 4 + (ver <= 9 ? 8 : 16) + bytes.length * 8 > numDataCodewords(ver) * 8) ver++;
+      if (ver > 40) throw new Error('Text too long for a QR code');
+      const ccBits = ver <= 9 ? 8 : 16;
+      const bits = [];
+      const push = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >>> i) & 1); };
+      push(4, 4); push(bytes.length, ccBits); bytes.forEach(b => push(b, 8));
+      const capacity = numDataCodewords(ver) * 8;
+      push(0, Math.min(4, capacity - bits.length));
+      push(0, (8 - bits.length % 8) % 8);
+      for (let pad = 0xEC; bits.length < capacity; pad ^= 0xEC ^ 0x11) push(pad, 8);
+      const data = Array(bits.length / 8).fill(0);
+      bits.forEach((b, i) => { data[i >>> 3] |= b << (7 - (i & 7)); });
+
+      const size = ver * 4 + 17;
+      const modules = Array.from({ length: size }, () => Array(size).fill(false));
+      const isFunction = Array.from({ length: size }, () => Array(size).fill(false));
+      const setFn = (x, y, dark) => { modules[y][x] = dark; isFunction[y][x] = true; };
+      for (let i = 0; i < size; i++) { setFn(6, i, i % 2 === 0); setFn(i, 6, i % 2 === 0); }
+      const finder = (cx, cy) => { for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) { const d = Math.max(Math.abs(dx), Math.abs(dy)), x = cx + dx, y = cy + dy; if (x >= 0 && x < size && y >= 0 && y < size) setFn(x, y, d !== 2 && d !== 4); } };
+      finder(3, 3); finder(size - 4, 3); finder(3, size - 4);
+      const pos = alignmentPositions(ver);
+      for (let i = 0; i < pos.length; i++) for (let j = 0; j < pos.length; j++) {
+        if ((i === 0 && j === 0) || (i === 0 && j === pos.length - 1) || (i === pos.length - 1 && j === 0)) continue;
+        for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) setFn(pos[i] + dx, pos[j] + dy, Math.max(Math.abs(dx), Math.abs(dy)) !== 1);
+      }
+      const drawFormat = mask => {
+        const d = (ECC.formatBits << 3) | mask;
+        let rem = d;
+        for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+        const fb = ((d << 10) | rem) ^ 0x5412;
+        const bit = i => ((fb >>> i) & 1) !== 0;
+        for (let i = 0; i <= 5; i++) setFn(8, i, bit(i));
+        setFn(8, 7, bit(6)); setFn(8, 8, bit(7)); setFn(7, 8, bit(8));
+        for (let i = 9; i < 15; i++) setFn(14 - i, 8, bit(i));
+        for (let i = 0; i < 8; i++) setFn(size - 1 - i, 8, bit(i));
+        for (let i = 8; i < 15; i++) setFn(8, size - 15 + i, bit(i));
+        setFn(8, size - 8, true);
+      };
+      drawFormat(0);
+      if (ver >= 7) {
+        let rem = ver;
+        for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+        const vb = (ver << 12) | rem;
+        for (let i = 0; i < 18; i++) { const bit = ((vb >>> i) & 1) !== 0, a = size - 11 + i % 3, b = Math.floor(i / 3); setFn(a, b, bit); setFn(b, a, bit); }
+      }
+      const all = addEccAndInterleave(ver, data);
+      let i = 0;
+      for (let right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) right = 5;
+        for (let vert = 0; vert < size; vert++) for (let j = 0; j < 2; j++) {
+          const x = right - j, upward = ((right + 1) & 2) === 0, y = upward ? size - 1 - vert : vert;
+          if (!isFunction[y][x] && i < all.length * 8) { modules[y][x] = ((all[i >>> 3] >>> (7 - (i & 7))) & 1) !== 0; i++; }
+        }
+      }
+      const applyMask = m => { for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (!isFunction[y][x] && MASKS[m](x, y)) modules[y][x] = !modules[y][x]; };
+      let best = 0, bestScore = Infinity;
+      for (let m = 0; m < 8; m++) { applyMask(m); drawFormat(m); const sc = penalty(modules, size); if (sc < bestScore) { bestScore = sc; best = m; } applyMask(m); }
+      applyMask(best); drawFormat(best);
+      return { size, modules };
+    }
+
+    function toSvg(text, quiet = 4) {
+      const { size, modules } = encode(text);
+      const n = size + quiet * 2;
+      let d = '';
+      for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) if (modules[y][x]) d += `M${x + quiet} ${y + quiet}h1v1h-1z`;
+      // Fixed black-on-white: a QR must keep its contrast in dark mode too.
+      return `<svg class="qr" viewBox="0 0 ${n} ${n}" role="img" aria-label="QR code for the receiver link" shape-rendering="crispEdges"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`;
+    }
+    return { encode, toSvg };
+  })();
+  window.__ss.QR = QR;
 
   // ---------- LANDING ----------
   function renderLanding(root) {
@@ -173,6 +733,7 @@
         </section>
 
         <div class="page">
+          <div id="storyStrip"></div>
           <div class="card demo-card" id="ctaDemo2" role="button" tabindex="0">
             <div class="ic">${I.play}</div>
             <div style="flex:1;min-width:0;">
@@ -201,6 +762,12 @@
     const d2 = root.querySelector('#ctaDemo2');
     d2.addEventListener('click', () => startWizard(loadDemo()));
     d2.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startWizard(loadDemo()); } });
+
+    // Story strip: corridor-wide, no rule filter; stays empty until three stories exist.
+    const strip = root.querySelector('#storyStrip');
+    const paintStrip = ins => { if (!strip.isConnected) return; strip.innerHTML = renderStoryStrip(ins); bindInsightThumbs(strip); };
+    const entry = insightEntry(state.corridor, []);
+    if (entry.data !== undefined) paintStrip(entry.data); else entry.promise.then(paintStrip);
   }
 
   function loadDemo() {
@@ -581,6 +1148,7 @@
             ${el.confidence ? `<dt>Confidence</dt><dd>${esc(el.confidence)} <span class="conf">${[1, 2, 3].map(n => `<i class="${n <= confN ? 'on' : ''}"></i>`).join('')}</span></dd>` : ''}
             <dt>Status</dt><dd style="font-weight:400;color:var(--text-tertiary);">Illustrative — not a customs determination</dd>
           </dl>
+          <div class="insight-slot" data-rule="${esc(it.ruleId || '')}"></div>
         </details>
       </div>`;
     }).join('');
@@ -601,7 +1169,11 @@
         <div class="card-head"><span class="card-title">Have these ready</span></div>
         <ul class="doc-list">${allDocs.map(d => `<li>${esc(d)}</li>`).join('')}</ul>
       </div>
+      <div id="qtapHost"></div>
       <p class="fine" style="margin-top:var(--space-3);">Sources named are the kinds of agencies that govern these rules; this prototype does not redistribute their text. Every estimate is illustrative and non-binding.</p>`;
+
+    loadStepInsight(body);
+    mountQuickTap(body.querySelector('#qtapHost'), 'check');
   }
 
   // ---------- STEP 3: PACKING ----------
@@ -649,7 +1221,10 @@
           <li><span>Put a contents card inside every box — it helps if customs opens it.</span></li>
         </ul>
       </div>
+      <div id="qtapHost"></div>
       <p class="fine" style="margin-top:var(--space-3);">The plan re-computes whenever your items change. Space used is an estimate from typical densities, not a 3D fit.</p>`;
+
+    mountQuickTap(body.querySelector('#qtapHost'), 'pack');
   }
 
   // ---------- STEP 4: COSTS ----------
@@ -713,6 +1288,7 @@
               </div>
               <p class="fine" style="margin-top:8px;">Illustrative estimate — not a live quote. Billed weight ${cost.chargeableKg} kg.</p>
             </details>
+            <div class="insight-slot" data-carrier="${esc(q.name)}" data-est="${Engine.round2(q.total)}"></div>
             <div class="acts">
               <button class="btn ${isChosen ? 'btn-primary' : 'btn-secondary'}" data-choose="${q.carrierId}">${isChosen ? I.check + ' Selected' : 'Choose this'}</button>
               <button class="btn btn-ghost" data-quote="${q.carrierId}">Request a real quote</button>
@@ -723,7 +1299,11 @@
       </div>
       <details style="margin-top:var(--space-3);"><summary class="fine" style="cursor:pointer;font-weight:600;">How duties were estimated</summary>
         <p class="fine" style="margin-top:6px;">${cost.dutyLines.map(d => `${esc(d.item)} @ ${(d.rate * 100).toFixed(1)}%`).join(' · ')}. Applied to declared values; illustrative, not a customs determination.</p>
-      </details>`;
+      </details>
+      <div id="qtapHost"></div>`;
+
+    loadStepInsight(body);
+    mountQuickTap(body.querySelector('#qtapHost'), 'cost');
 
     body.querySelector('#optToggle').addEventListener('click', e => {
       const b = e.target.closest('button[data-opt]'); if (!b) return;
@@ -779,6 +1359,8 @@
 
     const declRows = state.items.map(it => { const r = ruleOf(it); return `<tr><td>${esc(it.desc)}<div class="muted">${r ? esc(r.name) : 'Uncategorized'}</div></td><td class="num">${it.qty} ${esc(it.unit)}</td><td class="num">${money(it.valueUsd)}</td><td class="num">${esc(r ? r.hts : '—')}</td></tr>`; }).join('');
     const ck = (key, label) => `<li class="${state.checklist[key] ? 'done' : ''}"><label><input type="checkbox" data-ck="${key}" ${state.checklist[key] ? 'checked' : ''}><span>${label}</span></label></li>`;
+    // `feedbackDone` covers drafts that answered the old six-field form before this release.
+    const handoverDone = reportStatus('ship') === 'sent' || state.feedbackDone;
 
     body.innerHTML = `
       <div class="step-head">
@@ -819,21 +1401,7 @@
         <p class="fine" style="margin-top:8px;">Referral tracking, booking and tracking links appear here once real carrier integration is live.</p>
       </div>
 
-      <div class="card" id="feedbackCard">
-        <div class="card-head"><span class="card-title">Shipped something like this before?</span></div>
-        <p class="muted" style="margin-bottom:var(--space-3);">Tell us how it went. It shows in admin as <b>unverified community input</b>, kept apart from seeded data.</p>
-        ${state.feedbackDone ? `<div class="callout callout-ok"><span class="ic">${I.check}</span><div>Thanks — recorded as unverified community input.</div></div>` : `
-        <div class="fb-grid">
-          <div class="field"><label class="field-label">Carrier used</label><select class="input" id="fbCarrier">${cost.quotes.map(q => `<option value="${esc(q.name)}">${esc(q.name)}</option>`).join('')}<option value="Other">Other</option></select></div>
-          <div class="field"><label class="field-label">Our estimate ($)</label><input class="input" id="fbEst" type="number" inputmode="decimal" value="${Math.round(chosen.total)}"></div>
-          <div class="field"><label class="field-label">What you paid ($)</label><input class="input" id="fbAct" type="number" inputmode="decimal" placeholder="actual"></div>
-          <div class="field"><label class="field-label">Delay</label><select class="input" id="fbDelay"><option>none</option><option>1–2 days</option><option>3–7 days</option><option>8+ days</option></select></div>
-          <div class="field"><label class="field-label">Customs opened it?</label><select class="input" id="fbInspect"><option value="no">No</option><option value="yes">Yes</option></select></div>
-          <div class="field"><label class="field-label">Damage</label><select class="input" id="fbDamage"><option>none</option><option>minor</option><option>severe</option></select></div>
-        </div>
-        <div class="field" style="margin-top:var(--space-3);"><label class="field-label">Anything that surprised you? (optional)</label><textarea class="input" id="fbComments" style="min-height:72px;"></textarea></div>
-        <div style="margin-top:var(--space-3);"><button class="btn btn-primary" id="fbSubmit">Send feedback</button></div>`}
-      </div>`;
+      ${handoverDone ? renderShareCard(state.share, savedSenderName()) : renderHandoverReport(cost, chosen)}`;
 
     body.querySelectorAll('input[data-ck]').forEach(cb => cb.addEventListener('change', () => {
       state.checklist[cb.dataset.ck] = cb.checked; saveState();
@@ -852,30 +1420,275 @@
     });
     body.querySelector('#btnCopyRef').addEventListener('click', () => copyText(`https://ship2us.example/r/${refCode}`));
 
-    const fbBtn = body.querySelector('#fbSubmit');
-    if (fbBtn) fbBtn.addEventListener('click', async () => {
-      const f = {
-        shipmentId: state.id, segment: state.segment,
-        carrier: body.querySelector('#fbCarrier').value,
-        estimatedCost: parseFloat(body.querySelector('#fbEst').value) || 0,
-        actualCost: parseFloat(body.querySelector('#fbAct').value) || 0,
-        delay: body.querySelector('#fbDelay').value,
-        inspected: body.querySelector('#fbInspect').value,
-        damage: body.querySelector('#fbDamage').value,
-        comments: body.querySelector('#fbComments').value.trim().slice(0, 600)
-      };
-      fbBtn.disabled = true;
-      try { await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ feedback: f }) }); }
-      catch (e) { showToast('Demo service unreachable — feedback kept in this browser only.'); }
-      state.feedbackDone = true; saveState(); renderStepShip(body);
-      showToast('Thank you — recorded as unverified community input.');
-    });
+    if (handoverDone) mountShareCard(body); else mountHandoverReport(body, cost, chosen);
   }
 
   function copyText(t) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(t).then(() => showToast('Copied.')).catch(() => showToast('Copy blocked by the browser — select the text manually.'));
     } else showToast('Copy not supported here — select the text manually.');
+  }
+
+  // =====================================================================
+  // RECEIVER ARRIVAL FLOW — #/r/:token
+  // Chrome-free, session-only. Talks only to the token-scoped share routes,
+  // so this page never learns the shipment id, items or cost. Kept in one
+  // block so the sender-side changes to this file merge without overlap.
+  // =====================================================================
+  const RCV_MAX_PHOTOS = 4;
+  const RCV_MAX_EDGE = 1600;   // px, long edge after client-side downscale
+  const RCV_STORY_MAX = 280;
+  const RCV_CONDITIONS = [
+    ['all_good', 'All good'],
+    ['damaged', 'Something damaged'],
+    ['missing', 'Something missing'],
+    ['opened_by_customs', 'Was opened by customs']
+  ];
+  const RCV_PANES_ARRIVED = ['arrived', 'condition', 'photos', 'story', 'send'];
+  const RCV_PANES_WAITING = ['arrived', 'story', 'send']; // nothing to rate or photograph yet
+  let rcv = null; // { token, status, ctx, pane, arrived, condition, photos, story, sending, error }
+
+  function setChrome(on) { document.body.classList.toggle('chrome-less', !on); }
+  function conditionLabel(key) { const c = RCV_CONDITIONS.find(([k]) => k === key); return c ? c[1] : key; }
+  function receiverPanes(r) { return r.arrived === false ? RCV_PANES_WAITING : RCV_PANES_ARRIVED; }
+  function receiverHeadline(ctx) {
+    const who = ctx.senderName ? esc(ctx.senderName) : 'Someone';
+    const what = typeof ctx.boxes === 'number' && ctx.boxes > 0 ? `${ctx.boxes} box${ctx.boxes === 1 ? '' : 'es'}` : 'a shipment';
+    const from = ctx.origin ? ` from ${esc(ctx.origin)}` : '';
+    return `${who} sent you ${what}${from}. Did it arrive?`;
+  }
+  // Condition taps: "All good" is exclusive with the problem taps.
+  function toggleCondition(list, key) {
+    if (list.includes(key)) return list.filter(k => k !== key);
+    return key === 'all_good' ? ['all_good'] : [...list.filter(k => k !== 'all_good'), key];
+  }
+  function receiverRoot() { return document.getElementById('appRoot'); }
+
+  async function fetchShareContext(token) {
+    const r = await fetch(`/api/share/${encodeURIComponent(token)}`);
+    if (r.status === 404) return { status: 'invalid' };
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'bad context');
+    return { status: j.used ? 'used' : 'open', ctx: j };
+  }
+
+  async function renderReceiver(root, token) {
+    if (!rcv || rcv.token !== token) {
+      rcv = { token, status: 'loading', ctx: null, pane: 0, arrived: null, condition: [], photos: [], story: '', sending: false, error: null };
+    }
+    if (rcv.status === 'loading') {
+      root.innerHTML = `<div class="page rcv"><div class="rcv-pane"><p class="muted">Opening your link…</p></div></div>`;
+      try { Object.assign(rcv, await fetchShareContext(token)); }
+      catch (e) { rcv.status = 'offline'; }
+    }
+    drawReceiver(root);
+  }
+
+  function drawReceiver(root) {
+    const r = rcv;
+    const page = inner => `<div class="page rcv">${inner}</div>`;
+    if (r.status === 'invalid') {
+      root.innerHTML = page(`<div class="rcv-pane rcv-center"><div class="rcv-ic">${I.stop}</div><h1 class="rcv-h">This link isn't valid</h1><p class="lede">Ask the sender for a fresh one.</p></div>`);
+      return;
+    }
+    if (r.status === 'offline') {
+      root.innerHTML = page(`<div class="rcv-pane rcv-center"><div class="rcv-ic">${I.warn}</div><h1 class="rcv-h">Couldn't open this link</h1><p class="lede">Check your connection and try again.</p><button class="btn btn-primary btn-lg" id="rcvRetry">Try again</button></div>`);
+      root.querySelector('#rcvRetry').addEventListener('click', () => { r.status = 'loading'; renderReceiver(root, r.token); });
+      return;
+    }
+    if (r.status === 'used' || r.status === 'sent') {
+      const justSent = r.status === 'sent';
+      root.innerHTML = page(`<div class="rcv-pane">
+        <div class="callout callout-ok"><span class="ic">${I.check}</span><div><b>${justSent ? 'Sent — thank you.' : 'Already sent — thank you.'}</b> ${justSent ? 'The next family shipping this way will see it.' : 'This link has been used; here is what was shared.'}</div></div>
+        <h2 class="rcv-h rcv-h-sm">${justSent ? 'What you told us' : 'What was reported'}</h2>
+        ${renderReceiverSummary(r.ctx.report || {}, { photos: (r.ctx.report && r.ctx.report.photos) || [] })}
+        <p class="fine">Shown to future senders as <b>community input · unverified</b>.</p>
+      </div>`);
+      return;
+    }
+    const panes = receiverPanes(r);
+    r.pane = Math.min(r.pane, panes.length - 1);
+    const key = panes[r.pane];
+    root.innerHTML = page(`
+      <div class="rcv-top">
+        ${r.pane > 0 ? `<button class="icon-btn" id="rcvBack" aria-label="Back">${I.back}</button>` : '<span class="icon-btn" aria-hidden="true"></span>'}
+        <div class="rcv-dots" role="progressbar" aria-label="Step ${r.pane + 1} of ${panes.length}" aria-valuemin="1" aria-valuemax="${panes.length}" aria-valuenow="${r.pane + 1}">${panes.map((_, i) => `<i class="${i <= r.pane ? 'on' : ''}"></i>`).join('')}</div>
+        <span class="icon-btn" aria-hidden="true"></span>
+      </div>
+      <div class="rcv-pane" data-pane="${key}">${renderReceiverPane(key, r)}</div>
+      <p class="fine rcv-foot">Takes about 30 seconds. No account — your answers appear to the next family as <b>community input · unverified</b>.</p>`);
+    bindReceiverPane(root, key, r);
+  }
+
+  function renderReceiverPane(key, r) {
+    const next = (label, disabled) => `<button class="btn btn-primary btn-lg btn-block" id="rcvNext" ${disabled ? 'disabled' : ''}>${label} ${I.arrow}</button>`;
+    switch (key) {
+      case 'arrived':
+        return `<h1 class="rcv-h">${receiverHeadline(r.ctx)}</h1>
+          <p class="lede">${r.ctx.dest ? `Heading to ${esc(r.ctx.dest)}.` : ''} Two taps and you're done.</p>
+          <div class="rcv-choices">
+            <button class="rcv-choice ${r.arrived === true ? 'on' : ''}" data-arrived="true"><span class="ic">${I.check}</span>Yes, it arrived</button>
+            <button class="rcv-choice ${r.arrived === false ? 'on' : ''}" data-arrived="false"><span class="ic">${I.box}</span>Still waiting</button>
+          </div>`;
+      case 'condition':
+        return `<h1 class="rcv-h">How was it?</h1><p class="lede">Tap everything that applies.</p>
+          <div class="rcv-choices">${RCV_CONDITIONS.map(([k, label]) => `<button class="rcv-choice ${r.condition.includes(k) ? 'on' : ''}" data-cond="${k}" aria-pressed="${r.condition.includes(k)}">${label}</button>`).join('')}</div>
+          ${next('Next', r.condition.length === 0)}`;
+      case 'photos':
+        return `<h1 class="rcv-h">Add photos</h1><p class="lede">Up to ${RCV_MAX_PHOTOS} — the box, what was inside, anything that surprised you.</p>
+          ${renderReceiverPhotoPicker(r)}
+          ${next(r.photos.length ? 'Next' : 'Skip for now', false)}`;
+      case 'story':
+        return `<h1 class="rcv-h">One line for the next family</h1><p class="lede">Optional. What would you tell someone ${r.ctx.origin ? `shipping from ${esc(r.ctx.origin)}` : 'shipping the same way'}?</p>
+          <textarea class="input" id="rcvStory" maxlength="${RCV_STORY_MAX}" placeholder="e.g. Everything came in one piece — the jars were wrapped well.">${esc(r.story)}</textarea>
+          <div class="fine rcv-count" id="rcvCount">${r.story.length}/${RCV_STORY_MAX}</div>
+          ${next(r.story.trim() ? 'Next' : 'Skip', false)}`;
+      case 'send': {
+        const pending = r.photos.some(p => p.status === 'uploading');
+        return `<h1 class="rcv-h">Ready to send?</h1><p class="lede">One tap. You can't edit it afterwards.</p>
+          ${renderReceiverSummary(r, { photos: r.photos.filter(p => p.status !== 'error').map(p => p.preview) })}
+          ${r.error ? `<div class="callout callout-err" style="margin-bottom:var(--space-3);"><span class="ic">${I.warn}</span><div>${esc(r.error)}</div></div>` : ''}
+          <button class="btn btn-primary btn-lg btn-block" id="rcvSend" ${pending || r.sending ? 'disabled' : ''}>${r.sending ? 'Sending…' : pending ? 'Waiting for photos to finish…' : 'Send'}</button>`;
+      }
+      default: return '';
+    }
+  }
+
+  // Own picker so this PR does not depend on the sender-side `renderPhotoPicker`.
+  function renderReceiverPhotoPicker(r) {
+    const statusLabel = { uploading: 'Uploading…', error: "Couldn't add this one" };
+    return `<div class="rcv-photos">
+      ${r.photos.map(p => `<div class="rcv-thumb ${p.status}" data-pid="${p.id}">
+        ${p.preview ? `<img src="${esc(p.preview)}" alt="Your photo">` : ''}
+        ${statusLabel[p.status] ? `<span class="st">${statusLabel[p.status]}</span>` : ''}
+        <button type="button" class="rcv-thumb-x" data-remove="${p.id}" aria-label="Remove photo">&times;</button>
+      </div>`).join('')}
+      ${r.photos.length < RCV_MAX_PHOTOS ? `<label class="rcv-add"><input type="file" id="rcvFile" accept="image/*" capture="environment" multiple>${I.camera}<span>Add photo</span></label>` : ''}
+    </div>`;
+  }
+
+  // Shared between the Send pane (previews) and the read-only recap (served paths).
+  function renderReceiverSummary(rep, { photos }) {
+    const arrived = rep.arrived === true ? 'Arrived' : rep.arrived === false ? 'Still waiting' : null;
+    const conds = Array.isArray(rep.condition) ? rep.condition : [];
+    return `<div class="rcv-recap">
+      ${arrived ? `<div><div class="k">Status</div><div class="row"><span class="chip">${arrived}</span></div></div>` : ''}
+      ${conds.length ? `<div><div class="k">How it was</div><div class="row">${conds.map(c => `<span class="chip">${esc(conditionLabel(c))}</span>`).join('')}</div></div>` : ''}
+      ${photos.length ? `<div><div class="k">Photos</div><div class="rcv-photos">${photos.map(src => `<div class="rcv-thumb done"><img src="${esc(src)}" alt="Receiver photo"></div>`).join('')}</div></div>` : ''}
+      ${rep.story && rep.story.trim() ? `<div><div class="k">For the next family</div><q>${esc(rep.story.trim())}</q></div>` : ''}
+      ${rep.submittedAt ? `<div class="fine">Sent ${esc(String(rep.submittedAt).slice(0, 10))}</div>` : ''}
+    </div>`;
+  }
+
+  function bindReceiverPane(root, key, r) {
+    const back = root.querySelector('#rcvBack');
+    if (back) back.addEventListener('click', () => { r.pane = Math.max(0, r.pane - 1); drawReceiver(root); scrollTop(); });
+    const advance = () => { r.pane += 1; drawReceiver(root); scrollTop(); };
+    const nextBtn = root.querySelector('#rcvNext');
+    if (nextBtn) nextBtn.addEventListener('click', advance);
+
+    if (key === 'arrived') {
+      root.querySelectorAll('[data-arrived]').forEach(b => b.addEventListener('click', () => {
+        r.arrived = b.dataset.arrived === 'true';
+        if (!r.arrived) r.condition = [];
+        advance();
+      }));
+    }
+    if (key === 'condition') {
+      root.querySelectorAll('[data-cond]').forEach(b => b.addEventListener('click', () => {
+        r.condition = toggleCondition(r.condition, b.dataset.cond);
+        drawReceiver(root);
+      }));
+    }
+    if (key === 'photos') bindReceiverPhotoPicker(root, r);
+    if (key === 'story') {
+      const ta = root.querySelector('#rcvStory');
+      ta.addEventListener('input', () => {
+        r.story = ta.value.slice(0, RCV_STORY_MAX);
+        root.querySelector('#rcvCount').textContent = `${r.story.length}/${RCV_STORY_MAX}`;
+        nextBtn.innerHTML = `${r.story.trim() ? 'Next' : 'Skip'} ${I.arrow}`;
+      });
+    }
+    if (key === 'send') root.querySelector('#rcvSend').addEventListener('click', () => sendReceiverReport(root, r));
+  }
+
+  function bindReceiverPhotoPicker(root, r) {
+    const file = root.querySelector('#rcvFile');
+    if (file) file.addEventListener('change', () => { addReceiverPhotos(r, Array.from(file.files || [])); });
+    root.querySelectorAll('[data-remove]').forEach(b => b.addEventListener('click', () => {
+      const p = r.photos.find(x => x.id === b.dataset.remove);
+      if (p && p.preview) URL.revokeObjectURL(p.preview);
+      r.photos = r.photos.filter(x => x.id !== b.dataset.remove);
+      drawReceiver(root);
+    }));
+  }
+
+  // Re-render only on panes that show upload state; the story textarea keeps the caret.
+  function redrawReceiverIfUploadPane() {
+    if (rcv !== null && rcv.status === 'open' && ['photos', 'send'].includes(receiverPanes(rcv)[rcv.pane])) drawReceiver(receiverRoot());
+  }
+
+  // Long edge capped so a 12 MB phone shot never hits the server's 4 MB limit.
+  function downscaleImage(file, maxEdge) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        c.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        c.toBlob(b => (b ? resolve(b) : reject(new Error('Could not encode image'))), 'image/jpeg', 0.85);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Not an image')); };
+      img.src = url;
+    });
+  }
+
+  async function addReceiverPhotos(r, files) {
+    for (const file of files) {
+      if (r.photos.length >= RCV_MAX_PHOTOS) break;
+      const p = { id: 'ph_' + Math.random().toString(36).slice(2, 8), status: 'uploading', preview: '', path: null };
+      r.photos.push(p);
+      redrawReceiverIfUploadPane();
+      try {
+        const blob = await downscaleImage(file, RCV_MAX_EDGE);
+        p.preview = URL.createObjectURL(blob);
+        redrawReceiverIfUploadPane();
+        const res = await fetch(`/api/share/${encodeURIComponent(r.token)}/photo`, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || !j.ok || !j.path) throw new Error(j.error || 'Upload failed');
+        p.status = 'done';
+        p.path = j.path;
+      } catch (e) {
+        p.status = 'error'; // red ring + "Couldn't add this one"; the rest proceed
+      }
+      redrawReceiverIfUploadPane();
+    }
+  }
+
+  async function sendReceiverReport(root, r) {
+    if (r.sending) return;
+    r.sending = true; r.error = null;
+    drawReceiver(root);
+    const report = { arrived: r.arrived, photos: r.photos.filter(p => p.status === 'done').map(p => p.path) };
+    if (r.arrived && r.condition.length) report.condition = r.condition;
+    if (r.story.trim()) report.story = r.story.trim().slice(0, RCV_STORY_MAX);
+    try {
+      const res = await fetch(`/api/share/${encodeURIComponent(r.token)}/report`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ report }) });
+      const j = await res.json().catch(() => ({}));
+      if (res.status === 404) r.status = 'invalid';
+      else if (res.status === 409) Object.assign(r, await fetchShareContext(r.token)); // someone else used it first — show their recap
+      else if (!res.ok || !j.ok) throw new Error(j.error || 'Send failed');
+      else { r.ctx = { ...r.ctx, used: true, report: j.report }; r.status = 'sent'; }
+    } catch (e) {
+      r.error = "Couldn't send — check your connection and try again.";
+    }
+    r.sending = false;
+    drawReceiver(root);
+    scrollTop();
   }
 
   // ---------- ABOUT ----------

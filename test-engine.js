@@ -81,5 +81,37 @@ check('null-rule plan+cost ok', plan2.boxes.length >= 1 && cost2.quotes.length =
 const el = Engine.eligibilityFor(weird[0], SEED.itemRules, 'consumer');
 check('null-rule eligibility fallback', el.category === 'Uncategorized item' && el.dutyRate === null);
 
+// 10. Community insight roll-up (A4) — pure over report rows, never touches engine math
+const rpt = (over) => ({
+  id: 'rp_' + Math.random().toString(36).slice(2, 8), shipmentId: 'shp_x', role: 'sender', stage: 'check',
+  corridor: 'IN-US', ruleIds: ['pickles'], segment: 'consumer', photos: [], submittedAt: '2026-10-01T00:00:00.000Z', unverified: true, ...over
+});
+const reports = [
+  rpt({ verdict: 'yes', story: 'Arrived fine.', submittedAt: '2026-10-01T00:00:00.000Z', photos: ['/uploads/shp_x/a.jpg'] }),
+  rpt({ verdict: 'not_quite', condition: ['opened_by_customs'], story: 'Opened at customs.', submittedAt: '2026-10-03T00:00:00.000Z', photos: ['/uploads/shp_x/b.jpg', '/uploads/shp_x/c.jpg'] }),
+  rpt({ role: 'receiver', stage: 'arrival', condition: ['damaged', 'opened_by_customs'], story: 'One jar cracked and the box was refused at first.', submittedAt: '2026-10-05T00:00:00.000Z', photos: ['/uploads/shp_x/d.jpg', '/uploads/shp_x/e.jpg'] }),
+  rpt({ role: 'receiver', stage: 'arrival', condition: ['missing'], submittedAt: '2026-10-02T00:00:00.000Z' }),
+  rpt({ verdict: 'yes', hidden: true, story: 'Hidden story.', submittedAt: '2026-10-09T00:00:00.000Z', photos: ['/uploads/shp_x/hidden.jpg'] }),
+  rpt({ ruleIds: ['snacks'], verdict: 'yes', submittedAt: '2026-10-04T00:00:00.000Z' }),
+  rpt({ ruleIds: ['snacks'], verdict: 'yes', submittedAt: '2026-10-04T00:00:00.000Z' }),
+  rpt({ corridor: 'CN-US', verdict: 'yes', submittedAt: '2026-10-08T00:00:00.000Z' }),
+  rpt({ stage: 'ship', estimatedCost: 210, actualCost: 238, carrier: 'UPS', submittedAt: '2026-10-06T00:00:00.000Z' }),
+  rpt({ stage: 'ship', estimatedCost: 210, actualCost: 0, submittedAt: '2026-10-06T00:00:00.000Z' }),
+  rpt({ stage: 'ship', actualCost: 224, submittedAt: '2026-10-06T00:00:00.000Z' })
+];
+const ins = Engine.insightFor(reports, 'IN-US', ['pickles', 'snacks', 'clothes']);
+const pk = ins.rules.pickles;
+check('insight excludes hidden reports', ins.reports === 9 && !pk.stories.some(s => s.story === 'Hidden story.') && !pk.photos.includes('/uploads/shp_x/hidden.jpg'), `reports=${ins.reports}`);
+check('insight excludes other corridors', !ins.costSamples.some(c => c.corridor === 'CN-US') && ins.reports === reports.filter(r => !r.hidden && r.corridor === 'IN-US').length);
+check('insight sparse key (<3) shows empty state', ins.rules.snacks.sparse === true && ins.rules.snacks.reports === 2 && ins.rules.snacks.yes === undefined, JSON.stringify(ins.rules.snacks));
+check('insight unknown key reports 0', ins.rules.clothes.reports === 0 && ins.rules.clothes.sparse === true);
+check('insight counts verdicts and conditions', pk.reports === 7 && pk.yes === 1 && pk.notQuite === 1 && pk.openedByCustoms === 2 && pk.damaged === 1 && pk.missing === 1, JSON.stringify(pk));
+check('insight refusedHint from story text only', pk.refusedHint === 1);
+check('insight ≤2 stories newest first', pk.stories.length === 2 && pk.stories[0].story.startsWith('One jar cracked') && pk.stories[1].story === 'Opened at customs.', JSON.stringify(pk.stories.map(s => s.story)));
+check('insight ≤3 photos', pk.photos.length === 3 && pk.photos.every(p => p.startsWith('/uploads/shp_x/')), JSON.stringify(pk.photos));
+check('insight cost samples need both costs', ins.costSamples.length === 1 && ins.costSamples[0].estimated === 210 && ins.costSamples[0].actual === 238 && ins.costSamples[0].carrier === 'UPS', JSON.stringify(ins.costSamples));
+check('insight threshold constant exported', Engine.INSIGHT_MIN_REPORTS === 3);
+check('insight tolerates empty/garbage input', Engine.insightFor(null, 'IN-US', null).reports === 0 && Engine.insightFor([null, {}], null, ['x']).rules.x.reports === 0);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
