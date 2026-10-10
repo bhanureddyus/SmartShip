@@ -169,11 +169,23 @@ async function main() {
   r = await api('GET', '/api/share/nope-nope-nope');
   check('A3 unknown token GET → 404', r.status === 404, r.status);
 
-  r = await api('POST', `/api/share/${token}/report`, { report: { role: 'sender', stage: 'check', arrived: true, condition: ['opened_by_customs'], story: 'All jars intact.', senderName: 'Spoof' } });
+  // token-scoped receiver photo upload (the receiver page never sees the shipment id)
+  r = await api('POST', `/api/share/${token}/photo`, png, { 'Content-Type': 'image/png' });
+  check('A3 token photo upload lands in the shipment folder as receiver', r.status === 200 && r.json.path.startsWith(`/uploads/${sid}/receiver-`), r.json && r.json.path);
+  const receiverPhoto = r.json.path;
+  r = await api('POST', `/api/share/${token}/photo`, Buffer.from('definitely not an image, just text padding here'), { 'Content-Type': 'image/png' });
+  check('A3 token photo rejects non-image bytes → 415', r.status === 415, r.status);
+  r = await api('POST', '/api/share/nope-nope-nope/photo', png, { 'Content-Type': 'image/png' });
+  check('A3 token photo unknown token → 404', r.status === 404, r.status);
+
+  r = await api('POST', `/api/share/${token}/report`, { report: { role: 'sender', stage: 'check', arrived: true, condition: ['opened_by_customs'], story: 'All jars intact.', senderName: 'Spoof', photos: [receiverPhoto] } });
   check('A3 receiver report forced to receiver/arrival', r.status === 200 && r.json.report.role === 'receiver' && r.json.report.stage === 'arrival' && r.json.report.arrived === true, JSON.stringify(r.json));
+  check('A3 receiver report keeps the token-uploaded photo', r.status === 200 && r.json.report.photos[0] === receiverPhoto);
   check('A3 senderName comes from the token, not the body', r.json.report.senderName === 'Bhanu', r.json.report && r.json.report.senderName);
   r = await api('POST', `/api/share/${token}/report`, { report: { arrived: true } });
   check('A3 token reuse → 409', r.status === 409, r.status);
+  r = await api('POST', `/api/share/${token}/photo`, png, { 'Content-Type': 'image/png' });
+  check('A3 token photo after use → 409', r.status === 409, r.status);
   r = await api('POST', '/api/share/nope-nope-nope/report', { report: { arrived: true } });
   check('A3 unknown token POST → 404', r.status === 404, r.status);
   r = await api('GET', `/api/share/${token}`);

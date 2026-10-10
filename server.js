@@ -190,7 +190,27 @@ const IMAGE_TYPES = {
   'image/webp': { ext: 'webp', magic: buf => buf.slice(0, 4).toString('ascii') === 'RIFF' && buf.slice(8, 12).toString('ascii') === 'WEBP' }
 };
 function contentTypeOf(req) { return String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase(); }
-function isPhotoRoute(req, url) { return req.method === 'POST' && url.pathname === '/api/photo'; }
+const SHARE_ROUTE_RE = /^\/api\/share\/([A-Za-z0-9_-]+)(\/report|\/photo)?$/;
+// Raw-byte routes: the sender upload and the token-scoped receiver upload share one body cap and one handler.
+function isPhotoRoute(req, url) {
+  if (req.method !== 'POST') return false;
+  if (url.pathname === '/api/photo') return true;
+  const m = url.pathname.match(SHARE_ROUTE_RE);
+  return Boolean(m && m[2] === '/photo');
+}
+
+// Validates and writes one uploaded image. Returns { code, body } so both photo routes answer identically.
+function storePhoto(req, raw, shipmentId, role) {
+  const type = IMAGE_TYPES[contentTypeOf(req)];
+  if (!type) return { code: 415, body: { ok: false, error: 'Content-Type must be image/jpeg, image/png or image/webp' } };
+  if (raw.length < 12 || !type.magic(raw)) return { code: 415, body: { ok: false, error: 'Body is not a valid image' } };
+  const dir = path.join(UPLOADS, shipmentId);
+  if (countPhotos(dir, role) >= PHOTOS_PER_REPORT) return { code: 409, body: { ok: false, error: `At most ${PHOTOS_PER_REPORT} photos per shipment` } };
+  fs.mkdirSync(dir, { recursive: true });
+  const name = `${role}-${newReportId().slice(3)}.${type.ext}`;
+  fs.writeFileSync(path.join(dir, name), raw);
+  return { code: 200, body: { ok: true, path: `/uploads/${shipmentId}/${name}` } };
+}
 
 // Files are named `<role>-<id>.<ext>` so the per-shipment+role cap is a directory listing, not a db field.
 function countPhotos(dir, role) {
@@ -284,7 +304,7 @@ const server = http.createServer((req, res) => {
     const db = readDB();
     try {
       // Parameterised routes first; the fixed ones fall through to the switch.
-      const shareMatch = url.pathname.match(/^\/api\/share\/([A-Za-z0-9_-]+)(\/report)?$/);
+      const shareMatch = url.pathname.match(SHARE_ROUTE_RE);
       if (shareMatch) {
         const token = db.shareTokens.find(t => t.token === shareMatch[1]);
         if (req.method === 'GET' && !shareMatch[2]) {
@@ -296,6 +316,11 @@ const server = http.createServer((req, res) => {
           if (token.usedAt) return json(res, 409, { ok: false, error: 'This link was already used' });
           const shipment = db.shipments.find(s => s.id === token.shipmentId);
           if (!shipment) return json(res, 404, { ok: false, error: 'Unknown shipment' });
+          if (shareMatch[2] === '/photo') {
+            // The receiver page never learns the shipment id; the token scopes the upload and pins the role.
+            const stored = storePhoto(req, raw, shipment.id, 'receiver');
+            return json(res, stored.code, stored.body);
+          }
           const built = buildReport({ ...(data.report || {}), senderName: token.senderName }, shipment, { role: 'receiver', stage: 'arrival' });
           if (!built.ok) return json(res, built.code, { ok: false, error: built.error });
           token.usedAt = built.report.submittedAt;
@@ -363,15 +388,8 @@ const server = http.createServer((req, res) => {
           const role = url.searchParams.get('role') || 'sender';
           if (!ROLE_STAGES[role]) return json(res, 422, { ok: false, error: 'Invalid role' });
           if (!db.shipments.some(s => s.id === shipmentId)) return json(res, 404, { ok: false, error: 'Unknown shipment' });
-          const type = IMAGE_TYPES[contentTypeOf(req)];
-          if (!type) return json(res, 415, { ok: false, error: 'Content-Type must be image/jpeg, image/png or image/webp' });
-          if (raw.length < 12 || !type.magic(raw)) return json(res, 415, { ok: false, error: 'Body is not a valid image' });
-          const dir = path.join(UPLOADS, shipmentId);
-          if (countPhotos(dir, role) >= PHOTOS_PER_REPORT) return json(res, 409, { ok: false, error: `At most ${PHOTOS_PER_REPORT} photos per shipment` });
-          fs.mkdirSync(dir, { recursive: true });
-          const name = `${role}-${newReportId().slice(3)}.${type.ext}`;
-          fs.writeFileSync(path.join(dir, name), raw);
-          return json(res, 200, { ok: true, path: `/uploads/${shipmentId}/${name}` });
+          const stored = storePhoto(req, raw, shipmentId, role);
+          return json(res, stored.code, stored.body);
         }
 
         case 'POST /api/share': {

@@ -5,12 +5,13 @@
 // =============================================================================
 const Admin = (() => {
 
-  let server = { ruleOverrides: null, rateOverrides: null, metaUpdatedAt: null, feedback: [], quotes: [], shipments: [] };
+  let server = { ruleOverrides: null, rateOverrides: null, metaUpdatedAt: null, feedback: [], reports: [], quotes: [], shipments: [] };
   let rules = [];   // working copies
   let rates = [];
   let tab = 'rules';
   let dirty = false;
   let openIds = new Set(); // which cards are expanded (preserved across re-renders)
+  let reportFilter = 'all'; // all | sender | receiver | hidden
 
   const IC = {
     caret: '<svg class="caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
@@ -79,7 +80,7 @@ const Admin = (() => {
         <div class="tabs" role="tablist">
           <button class="tab" role="tab" data-tab="rules">Tariff rules</button>
           <button class="tab" role="tab" data-tab="rates">Carrier rates</button>
-          <button class="tab" role="tab" data-tab="fb">Feedback &amp; quotes</button>
+          <button class="tab" role="tab" data-tab="fb">Community reports</button>
         </div>
         <div id="tabBody"></div>
 
@@ -293,36 +294,73 @@ const Admin = (() => {
     bindCards(body);
   }
 
-  // ---------- Feedback & quote requests ----------
+  // ---------- Community reports (both roles) + quote requests ----------
+  const REPORT_FILTERS = [['all', 'All'], ['sender', 'Sender'], ['receiver', 'Receiver'], ['hidden', 'Hidden']];
+  const STAGE_LABEL = { check: 'Check', pack: 'Pack', cost: 'Cost', ship: 'Ship', arrival: 'Arrival' };
+  const CONDITION_LABEL = { all_good: 'All good', damaged: 'Damaged', missing: 'Missing', opened_by_customs: 'Opened by customs' };
+
+  // Pure: which reports a filter shows. Hidden rows only appear under "Hidden".
+  function filterReports(reports, filter) {
+    if (filter === 'hidden') return reports.filter(r => r.hidden);
+    return reports.filter(r => !r.hidden && (filter === 'all' || r.role === filter));
+  }
+
+  // Every tap the report carries, as chip labels — only what that moment asked.
+  function reportTaps(r) {
+    const taps = [];
+    if (r.verdict) taps.push(r.verdict === 'yes' ? 'Matches what I saw' : 'Not quite');
+    if (r.outcome) taps.push(r.outcome === 'smooth' ? 'Went smoothly' : 'Had a hiccup');
+    if (r.arrived === true) taps.push('Arrived');
+    if (r.arrived === false) taps.push('Still waiting');
+    for (const c of r.condition || []) taps.push(CONDITION_LABEL[c] || c);
+    if (r.carrier) taps.push(r.carrier);
+    return taps;
+  }
+
+  function renderReportCard(r) {
+    const delta = (+r.actualCost || 0) - (+r.estimatedCost || 0);
+    const hasCost = typeof r.estimatedCost === 'number' && typeof r.actualCost === 'number' && r.actualCost > 0;
+    const photos = Array.isArray(r.photos) ? r.photos : [];
+    return `
+      <div class="fb-card ${r.hidden ? 'is-hidden' : ''}" data-report="${esc(r.id)}">
+        <div class="head">
+          <span class="badge ${r.role === 'receiver' ? 'badge-accent' : 'badge-neutral'}">${r.role === 'receiver' ? 'Receiver' : 'Sender'}</span>
+          <span class="badge badge-neutral">${esc(STAGE_LABEL[r.stage] || r.stage)}</span>
+          <span class="badge badge-warning">Unverified community input</span>
+          ${r.hidden ? '<span class="badge badge-error">Hidden</span>' : ''}
+          <span class="spacer"></span>
+          <span class="muted" title="${esc(r.submittedAt || '')}">${esc((r.submittedAt || '').replace('T', ' ').slice(0, 16))}</span>
+        </div>
+        <div class="facts">
+          <span>${esc(r.corridor || '—')} · <b>${esc(r.segment || 'consumer')}</b></span>
+          ${r.senderName ? `<span>From <b>${esc(r.senderName)}</b></span>` : ''}
+          ${hasCost ? `<span>Estimated <b>${money(r.estimatedCost)}</b> · paid <b>${money(r.actualCost)}</b> <b class="${delta > 0 ? 'delta-up' : 'delta-down'}">(${delta >= 0 ? '+' : ''}${money(delta)})</b></span>` : ''}
+          ${(r.ruleIds || []).length ? `<span>Items <b>${esc(r.ruleIds.join(', '))}</b></span>` : ''}
+        </div>
+        ${reportTaps(r).length ? `<div class="taps">${reportTaps(r).map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
+        ${r.story ? `<q>${esc(r.story)}</q>` : ''}
+        ${photos.length ? `<div class="thumbs">${photos.map(p => `<a href="${esc(p)}" target="_blank" rel="noopener" title="Open full size"><img src="${esc(p)}" alt="Community photo" loading="lazy" onerror="this.parentNode.outerHTML='<span class=&quot;missing&quot;>no file</span>'"></a>`).join('')}</div>` : ''}
+        <div class="foot">
+          <button class="btn btn-secondary btn-sm" data-hide="${esc(r.id)}" data-next="${r.hidden ? 'false' : 'true'}">${r.hidden ? 'Show' : 'Hide'}</button>
+          <span class="fine">${r.hidden ? 'Hidden reports never reach community insight.' : 'Hide to keep this out of community insight.'}</span>
+        </div>
+      </div>`;
+  }
+
   function renderFeedback(body) {
-    const fb = server.feedback || [];
+    const all = server.reports || [];
+    const shown = filterReports(all, reportFilter);
     const qt = server.quotes || [];
+    const counts = Object.fromEntries(REPORT_FILTERS.map(([k]) => [k, filterReports(all, k).length]));
     body.innerHTML = `
       <div class="card">
         <div class="card-head">
-          <span class="card-title">Post-shipment feedback <span class="badge badge-warning">Unverified community input</span></span>
-          <span class="muted">${fb.length} submission${fb.length === 1 ? '' : 's'}</span>
+          <span class="card-title">Community reports <span class="badge badge-warning">Unverified community input</span></span>
+          <span class="muted">${all.length} report${all.length === 1 ? '' : 's'}</span>
         </div>
-        <p class="muted" style="margin-bottom:var(--space-3);">Estimated vs actual outcomes reported by demo users. Kept separate from seeded data — never merged into the rule set without review.</p>
-        ${fb.length ? fb.slice().reverse().map(f => {
-          const delta = (+f.actualCost || 0) - (+f.estimatedCost || 0);
-          return `
-          <div class="fb-card">
-            <div class="head">
-              <span class="strong">${esc(f.carrier || 'Unspecified carrier')}</span>
-              <span class="badge badge-warning">Unverified</span>
-              <span class="badge badge-neutral">${esc(f.segment || 'consumer')}</span>
-              <span class="spacer"></span>
-              <span class="muted">${esc((f.submittedAt || '').slice(0, 10))}</span>
-            </div>
-            <div class="facts">
-              <span>Estimated <b>${money(f.estimatedCost)}</b> · actual <b>${money(f.actualCost)}</b>${f.estimatedCost ? ` <b class="${delta > 0 ? 'delta-up' : 'delta-down'}">(${delta >= 0 ? '+' : ''}${money(delta)})</b>` : ''}</span>
-              <span>Delay <b>${esc(f.delay || 'none')}</b></span>
-              <span>Inspected <b>${f.inspected === 'yes' ? 'yes' : 'no'}</b></span>
-              <span>Damage <b>${esc(f.damage || 'none')}</b></span>
-            </div>
-            ${f.comments ? `<q>${esc(f.comments)}</q>` : ''}
-          </div>`; }).join('') : '<div class="empty">No feedback yet. It appears here the moment someone submits the post-shipment form.</div>'}
+        <p class="muted" style="margin-bottom:var(--space-3);">What senders and receivers reported about real shipments. Shown beside engine output, never fed into it. Hidden reports stay stored but leave community insight.</p>
+        <div class="rp-filters" role="tablist" aria-label="Filter reports">${REPORT_FILTERS.map(([k, label]) => `<button class="chip ${reportFilter === k ? 'active' : ''}" data-filter="${k}" role="tab" aria-selected="${reportFilter === k}">${label} · ${counts[k]}</button>`).join('')}</div>
+        ${shown.length ? shown.map(renderReportCard).join('') : `<div class="empty">${reportFilter === 'hidden' ? 'Nothing hidden.' : 'No reports here yet. They arrive from quick taps, the hand-over card, and receiver links.'}</div>`}
       </div>
 
       <div class="card">
@@ -341,6 +379,24 @@ const Admin = (() => {
         <div class="card-head"><span class="card-title">Saved shipment drafts</span><span class="muted">${(server.shipments || []).length} on the server</span></div>
         <p class="muted">Drafts persist server-side as users move through the journey — the prototype keeps the latest 25.</p>
       </div>`;
+
+    body.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { reportFilter = b.dataset.filter; renderFeedback(body); }));
+    body.querySelectorAll('[data-hide]').forEach(b => b.addEventListener('click', () => setReportHidden(b.dataset.hide, b.dataset.next === 'true', b)));
+  }
+
+  async function setReportHidden(id, hidden, btn) {
+    btn.disabled = true;
+    try {
+      const r = await fetch(`/api/report/${encodeURIComponent(id)}/hidden`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      await fetchState();
+      renderTab();
+      toast(hidden ? 'Hidden — it no longer reaches community insight.' : 'Shown again — back in community insight.');
+    } catch (e) {
+      btn.disabled = false;
+      toast(`Could not update this report: ${e.message}`);
+    }
   }
 
   // ---------- Save / reset ----------
