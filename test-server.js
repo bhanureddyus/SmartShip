@@ -70,8 +70,16 @@ async function main() {
   const seed = JSON.parse(fs.readFileSync(DB_COPY, 'utf8'));
   check('seed has no reports yet (migration pending)', seed.reports === undefined && Array.isArray(seed.feedback));
 
+  // ---------------- CORS: preflight + normal response ----------------
+  let r = await api('OPTIONS', '/api/report');
+  check('CORS preflight OPTIONS /api/report → 204', r.status === 204, r.status);
+  check('CORS preflight allows any origin', r.headers.get('access-control-allow-origin') === '*', r.headers.get('access-control-allow-origin'));
+  check('CORS preflight lists methods', /POST/.test(r.headers.get('access-control-allow-methods') || ''), r.headers.get('access-control-allow-methods'));
+  r = await api('GET', '/api/state');
+  check('CORS GET /api/state carries allow-origin', r.status === 200 && r.headers.get('access-control-allow-origin') === '*', r.headers.get('access-control-allow-origin'));
+
   // ---------------- A5: boot migration ----------------
-  let st = (await api('GET', '/api/state')).json.state;
+  let st = r.json.state;
   check('A5 migration creates reports from feedback', Array.isArray(st.reports) && st.reports.length === seed.feedback.length, `${st.reports.length} reports`);
   check('A5 feedback left intact', JSON.stringify(st.feedback) === JSON.stringify(seed.feedback));
   const migrated = st.reports.find(r => r.migratedFrom === 'fb_mv1e6s4h');
@@ -87,7 +95,7 @@ async function main() {
   const expectedRuleIds = [...new Set(shipment.items.map(i => i.ruleId))];
 
   // ---------------- A1: POST /api/report ----------------
-  let r = await api('POST', '/api/report', { report: { shipmentId: sid, role: 'sender', stage: 'check', verdict: 'yes', story: '  Pickles sailed through.  ' } });
+  r = await api('POST', '/api/report', { report: { shipmentId: sid, role: 'sender', stage: 'check', verdict: 'yes', story: '  Pickles sailed through.  ' } });
   check('A1 valid report accepted', r.status === 200 && r.json.ok, r.status);
   const rep = r.json.report || {};
   check('A1 stamps id/submittedAt/unverified', /^rp_/.test(rep.id) && !isNaN(Date.parse(rep.submittedAt)) && rep.unverified === true, rep.id);

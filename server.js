@@ -253,6 +253,15 @@ function serveStatic(res, baseDir, rel, extraHeaders, onMiss) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
 
+  // Permissive CORS: the Expo app (Expo Go, or the web export on another hosted
+  // origin) calls /api/* cross-origin. Set before routing so every response —
+  // static, uploads, API, errors — carries the headers.
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.setHeader('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+
   if (url.pathname.startsWith('/uploads/')) {
     return serveStatic(res, UPLOADS, url.pathname.slice('/uploads'.length), { 'Cache-Control': 'public, max-age=86400' },
       () => { res.writeHead(404); res.end('Not found'); });
