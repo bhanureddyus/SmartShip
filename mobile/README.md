@@ -41,7 +41,9 @@ recap on a second open. Receiver photos go through `POST /api/share/:token/photo
 
 ## Point it at a different API
 
-The app defaults to the hosted demo backend so Expo Go needs no local server.
+The app defaults to the hosted demo backend so Expo Go needs no local server. The API sends
+permissive CORS headers (and answers `OPTIONS` preflights), so `EXPO_PUBLIC_API_BASE` can point at
+any hosted origin from Expo Go or the web export.
 
 ```bash
 EXPO_PUBLIC_API_BASE=http://<your-lan-ip>:3000 npx expo start
@@ -77,6 +79,7 @@ src/
   theme.ts            tokens mirrored from public/app.css (light only)
   components/         QuickTap · InsightLine · PhotoPicker · ShareCard · ReceiverFlow · ui
 __tests__/            Jest (jest-expo preset)
+public/index.html     HTML shell for the web export (Expo's reset + hosted-preview badge rule)
 ```
 
 Community insight is shown beside engine output, never fed into it, and always carries the
