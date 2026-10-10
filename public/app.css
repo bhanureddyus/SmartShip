@@ -502,3 +502,9 @@ button.chip-ghost:hover { background: var(--surface-hover); }
 .qr { width: 200px; height: 200px; max-width: 100%; border-radius: var(--radius-md); border: 1px solid var(--border-subtle); background: #fff; }
 .qr-pending { font-size: 13px; color: var(--text-tertiary); text-align: center; padding: var(--space-4); border: 1px dashed var(--border-default); border-radius: var(--radius-md); }
 @media (max-width: 560px) { .share-grid { grid-template-columns: 1fr; } .qr { width: 180px; height: 180px; } }
+
+/* Hosted-preview only: the hosting layer injects a fixed bottom-right
+   "Created with Obvious" badge that overlaps the sticky action bar's primary
+   CTA. Keep the attribution, make it icon-only, and float it above the bar. */
+a[href="https://obvious.ai/"] { bottom: calc(84px + env(safe-area-inset-bottom)) !important; right: 12px !important; padding: 6px !important; gap: 0 !important; border-radius: 999px !important; opacity: .45 !important; }
+a[href="https://obvious.ai/"] span { display: none !important; }
